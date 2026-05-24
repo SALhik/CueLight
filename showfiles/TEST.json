@@ -1,0 +1,61 @@
+{
+  "show_name": "TEST",
+  "version": 1,
+  "cues": [
+    {
+      "sequence": 1,
+      "scene": "1",
+      "targets": [
+        {
+          "position": "LX",
+          "cue_number": "1"
+        }
+      ],
+      "note": ""
+    },
+    {
+      "sequence": 2,
+      "scene": "1",
+      "targets": [
+        {
+          "position": "LX",
+          "cue_number": "2"
+        }
+      ],
+      "note": ""
+    },
+    {
+      "sequence": 3,
+      "scene": "1",
+      "targets": [
+        {
+          "position": "LX",
+          "cue_number": "3"
+        }
+      ],
+      "note": "WOW"
+    },
+    {
+      "sequence": 4,
+      "scene": "1",
+      "targets": [
+        {
+          "position": "LX",
+          "cue_number": "4"
+        }
+      ],
+      "note": ""
+    },
+    {
+      "sequence": 5,
+      "scene": "1",
+      "targets": [
+        {
+          "position": "LX",
+          "cue_number": "5"
+        }
+      ],
+      "note": ""
+    }
+  ]
+}

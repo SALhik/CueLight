@@ -1,0 +1,59 @@
+{
+  "show_name": "Macbeth — Act I",
+  "version": 1,
+  "cues": [
+    {
+      "sequence": 1,
+      "scene": "1.1",
+      "targets": [
+        { "position": "LX", "cue_number": "1" },
+        { "position": "SND", "cue_number": "1" }
+      ],
+      "note": "Opening blackout, thunder"
+    },
+    {
+      "sequence": 2,
+      "scene": "1.1",
+      "targets": [
+        { "position": "LX", "cue_number": "2" }
+      ],
+      "note": "Witches enter"
+    },
+    {
+      "sequence": 3,
+      "scene": "1.1",
+      "targets": [
+        { "position": "SND", "cue_number": "2" },
+        { "position": "Fly", "cue_number": "1" }
+      ],
+      "note": "Thunder roll, flies in backdrop"
+    },
+    {
+      "sequence": 4,
+      "scene": "1.2",
+      "targets": [
+        { "position": "LX", "cue_number": "3" }
+      ],
+      "note": "Scene change — camp near Forres"
+    },
+    {
+      "sequence": 5,
+      "scene": "1.2",
+      "targets": [
+        { "position": "LX", "cue_number": "4" },
+        { "position": "SND", "cue_number": "3" }
+      ],
+      "note": "Trumpet flourish, Duncan enters"
+    },
+    {
+      "sequence": 6,
+      "scene": "1.3",
+      "targets": [
+        { "position": "LX", "cue_number": "5" },
+        { "position": "SND", "cue_number": "4" },
+        { "position": "Fly", "cue_number": "2" }
+      ],
+      "note": "Heath scene — all positions"
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.header-strip {
+  background: var(--surface);
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.header-strip .scene { font-weight: 700; color: var(--text); }
+.header-strip .cue-num { color: var(--yellow-bright); }
+
+.buttons-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+
+.btn-standby, .btn-go {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  border-radius: 12px;
+  transition: background 0.15s;
+}
+
+.btn-standby {
+  background: var(--red-dim);
+  color: #ff6666;
+}
+
+.btn-standby.called {
+  background: var(--red-bright);
+  color: #fff;
+}
+
+.btn-standby.acked {
+  background: var(--red-bright);
+  color: #fff;
+  animation: none;
+}
+
+.btn-go {
+  background: var(--green-dim);
+  color: #66dd66;
+}
+
+.btn-go.called {
+  background: var(--green-bright);
+  color: #fff;
+}
+
+.bottom-bezel {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+}
+
+.bezel-left { display: flex; align-items: center; gap: 8px; }
+.bezel-right { display: flex; align-items: center; gap: 8px; }
+
+.btn-reset {
+  background: var(--border);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.label-display {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green-bright);
+}
+
+.health-dot.yellow { background: var(--yellow-bright); }
+.health-dot.red { background: var(--red-bright); }
+
+.caller-warning {
+  background: var(--red-dim);
+  color: var(--red-bright);
+  text-align: center;
+  padding: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  display: none;
+}
+
+.caller-warning.visible { display: block; }
+
+.lock-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  font-size: 36px;
+  font-weight: 700;
+  color: #888;
+}
+
+.lock-overlay.visible { display: flex; }

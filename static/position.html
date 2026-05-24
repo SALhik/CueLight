@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CueLight — Position</title>
+  <link rel="stylesheet" href="/static/css/common.css">
+  <link rel="stylesheet" href="/static/css/position.css">
+</head>
+<body>
+  <div class="header-strip" id="headerStrip">
+    <span class="scene" id="sceneDisplay"></span>
+    <span class="cue-num" id="cueDisplay"></span>
+  </div>
+  <div class="buttons-area">
+    <button class="btn-standby" id="standbyBtn">STANDBY</button>
+    <button class="btn-go" id="goBtn">GO</button>
+  </div>
+  <div class="caller-warning" id="callerWarning">Caller disconnected — waiting…</div>
+  <div class="bottom-bezel">
+    <div class="bezel-left">
+      <button class="btn-reset" id="resetBtn">RESET</button>
+    </div>
+    <div class="bezel-right">
+      <span class="label-display" id="labelDisplay"></span>
+      <span class="health-dot" id="healthDot"></span>
+    </div>
+  </div>
+  <div class="lock-overlay" id="lockOverlay">LOCKED</div>
+  <script src="/static/js/position.js"></script>
+</body>
+</html>

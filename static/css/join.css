@@ -1,0 +1,94 @@
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100dvh;
+}
+
+.join-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  width: 320px;
+  text-align: center;
+}
+
+.join-card h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.join-card p {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+.join-card input {
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 18px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.join-card input::placeholder {
+  color: var(--text-dim);
+  text-transform: none;
+}
+
+.join-card .btn-join {
+  width: 100%;
+  padding: 14px;
+  background: var(--green-dim);
+  color: var(--green-bright);
+  font-size: 18px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.join-card .btn-join:hover {
+  background: var(--green-bright);
+  color: #fff;
+}
+
+.join-card .error {
+  color: var(--red-bright);
+  font-size: 13px;
+  margin-top: 8px;
+  display: none;
+}
+
+.join-card .error.visible {
+  display: block;
+}
+
+.join-card .password-field {
+  display: none;
+}
+
+.join-card .password-field.visible {
+  display: block;
+}
+
+.join-card .or-caller {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.join-card .btn-caller-link {
+  background: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  border: none;
+  font-weight: 400;
+}

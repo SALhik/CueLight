@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CueLight — Showfile Editor</title>
+  <link rel="stylesheet" href="/static/css/common.css">
+  <link rel="stylesheet" href="/static/css/editor.css">
+</head>
+<body>
+  <div class="editor-header">
+    <h1>Showfile Editor</h1>
+    <select id="fileSelect"></select>
+    <button id="loadBtn">Load</button>
+    <span style="color:var(--text-dim)">or</span>
+    <input type="text" id="newFilename" placeholder="new_show.json" size="20">
+    <button id="newBtn">New</button>
+  </div>
+
+  <div class="meta-fields">
+    <div><label>Show name: <input type="text" id="showName" size="30"></label></div>
+    <div><label>Version: <input type="number" id="showVersion" value="1" min="1" size="4"></label></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:60px">Seq</th>
+        <th style="width:80px">Scene</th>
+        <th>Targets (position:cue, …)</th>
+        <th>Note</th>
+        <th style="width:50px"></th>
+      </tr>
+    </thead>
+    <tbody id="cueBody"></tbody>
+  </table>
+
+  <div class="btn-row">
+    <button class="btn-add" id="addCueBtn">+ Add cue</button>
+    <button class="btn-save" id="saveBtn">Save</button>
+  </div>
+  <div class="status-msg" id="statusMsg"></div>
+
+  <script src="/static/js/editor.js"></script>
+</body>
+</html>
