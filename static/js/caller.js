@@ -374,11 +374,7 @@
       state.showfile ? `Loaded: ${state.showfile.filename}` : "No showfile loaded";
 
     // Network
-    try {
-      const res = await fetch("/api/info");
-      const info = await res.json();
-      document.getElementById("networkInfo").textContent = `${info.ip}:${info.port}`;
-    } catch (e) {}
+    document.getElementById("networkInfo").textContent = window.location.host;
 
     // Password
     document.getElementById("pwToggle").checked = state.password_enabled;
@@ -419,9 +415,7 @@
   // --- Join info ---
   document.getElementById("showJoinInfo").addEventListener("click", async () => {
     try {
-      const res = await fetch("/api/info");
-      const info = await res.json();
-      const url = `http://${info.ip}:${info.port}/join`;
+      const url = `http://${window.location.host}/join`;
       document.getElementById("urlText").textContent = url;
 
       let qrUrl = `/api/qr`;

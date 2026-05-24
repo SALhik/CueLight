@@ -132,9 +132,9 @@ async def api_save_showfile(filename: str, request: Request):
 
 
 @app.get("/api/qr")
-async def api_qr(password: str = ""):
-    ip = _get_local_ip()
-    url = f"http://{ip}:8000/join"
+async def api_qr(request: Request, password: str = ""):
+    host = request.headers.get("host") or f"{_get_local_ip()}:8000"
+    url = f"http://{host}/join"
     if password:
         url += f"?pw={password}"
     img = qrcode.make(url, box_size=8, border=2)
