@@ -435,10 +435,14 @@
       document.getElementById("qrImg").src = qrUrl;
     } catch (e) {}
     joinInfoScreen.style.display = "flex";
+    document.getElementById("showJoinInfo").style.display = "none";
+    document.getElementById("hideJoinInfo").style.display = "";
   });
 
   document.getElementById("hideJoinInfo").addEventListener("click", () => {
     joinInfoScreen.style.display = "none";
+    document.getElementById("hideJoinInfo").style.display = "none";
+    document.getElementById("showJoinInfo").style.display = "";
   });
 
   // --- Modal helpers ---

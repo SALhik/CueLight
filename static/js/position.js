@@ -95,13 +95,13 @@
         break;
 
       case "show_ended":
+        if (ws) { ws.onclose = null; ws.close(); }
         document.body.innerHTML =
           '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;font-size:24px;color:#888;">Show ended — please close this window.</div>';
-        if (ws) ws.close();
         break;
 
       case "removed":
-        if (ws) ws.close();
+        if (ws) { ws.onclose = null; ws.close(); }
         localStorage.removeItem("cuelight_label");
         document.body.innerHTML =
           '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;font-size:24px;color:#ff2222;text-align:center;padding:24px;">You have been removed from the show.</div>';
