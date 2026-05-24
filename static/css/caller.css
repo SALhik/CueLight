@@ -37,7 +37,6 @@ body {
   gap: 24px;
 }
 
-
 .join-info-screen .qr-img { border-radius: 12px; }
 
 .join-info-screen .url-text {
@@ -307,7 +306,7 @@ body {
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 120;
 }
 
 .modal-overlay.visible { display: flex; }
@@ -425,7 +424,7 @@ body {
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 115;
   font-size: 36px;
   font-weight: 700;
   color: #888;
