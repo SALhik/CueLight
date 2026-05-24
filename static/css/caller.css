@@ -4,7 +4,7 @@ body {
   height: 100dvh;
 }
 
-/* Landscape warning */
+/* Portrait warning — CSS media query is reliable on mobile; JS resize is not */
 .portrait-overlay {
   position: fixed;
   inset: 0;
@@ -16,6 +16,12 @@ body {
   font-size: 24px;
   color: var(--text-dim);
   backdrop-filter: blur(10px);
+}
+
+@media (orientation: portrait) {
+  .portrait-overlay {
+    display: flex;
+  }
 }
 
 /* Join info screen */
@@ -281,6 +287,11 @@ body {
   padding: 8px 16px;
   border-radius: 6px;
   font-size: 12px;
+}
+
+.bottom-bar .btn-lock {
+  position: relative;
+  z-index: 101;
 }
 
 .bottom-bar .btn-lock.locked {

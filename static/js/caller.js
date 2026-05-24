@@ -43,16 +43,7 @@
   const transportCue = document.getElementById("transportCue");
   const warningBanner = document.getElementById("warningBanner");
   const lockBtn = document.getElementById("lockBtn");
-  const portraitOverlay = document.getElementById("portraitOverlay");
   const joinInfoScreen = document.getElementById("joinInfoScreen");
-
-  // --- Portrait detection ---
-  function checkOrientation() {
-    const isPortrait = window.innerHeight > window.innerWidth;
-    portraitOverlay.style.display = isPortrait ? "flex" : "none";
-  }
-  window.addEventListener("resize", checkOrientation);
-  checkOrientation();
 
   // --- WebSocket ---
   function connect() {
@@ -476,4 +467,3 @@
   // --- Start ---
   connect();
 })();
-);

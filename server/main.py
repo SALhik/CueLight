@@ -6,7 +6,7 @@ from pathlib import Path
 
 import qrcode
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .persistence import load_state
@@ -54,6 +54,22 @@ async def position_page():
 @app.get("/editor", response_class=HTMLResponse)
 async def editor_page():
     return (STATIC_DIR / "editor.html").read_text()
+
+
+@app.get("/.well-known/appspecific/com.chrome.devtools.json")
+async def chrome_devtools_json():
+    return JSONResponse([])
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return Response(status_code=204)
+
+
+@app.get("/apple-touch-icon.png")
+@app.get("/apple-touch-icon-precomposed.png")
+async def apple_touch_icon():
+    return Response(status_code=204)
 
 
 # --- API ---
