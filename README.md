@@ -2,6 +2,8 @@
 
 A browser-based theatre cue light system. One machine runs the server; other devices on the same LAN connect as the Caller (stage manager's iPad) or Positions (operator phones).
 
+For a full walkthrough of every feature and how to use it, see [FEATURES.md](FEATURES.md).
+
 ## Install
 
 ```bash
