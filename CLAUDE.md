@@ -109,7 +109,7 @@ Server pings each position every 1s. Position echoes `pong` with the timestamp. 
 
 ## Conventions
 
-- **Backend:** Python 3.11+, dataclasses (not Pydantic), `from __future__ import annotations` in every file. No type checker is configured but type hints are used throughout.
+- **Backend:** Python 3.10+ (minimum, verified by the test suite), but 3.12 is the default — develop, test, and build on 3.12. Uses dataclasses (not Pydantic), `from __future__ import annotations` in every file. No type checker is configured but type hints are used throughout.
 - **Frontend:** Vanilla JS in IIFEs, no modules/imports/bundler. Each page has its own `.js` file. CSS uses custom properties defined in `common.css`. Class toggling (`.classList.add/remove/toggle`) for state changes, not inline styles.
 - **State serialization:** All model classes have `to_dict()` methods. The server sends dicts over WebSocket, never raw dataclass instances.
 - **Async locking:** All `StateManager` mutation methods use `async with self._lock:`. Private helpers like `_advance_cue()` and `_arm_current_cue()` are called inside an already-held lock — they must never acquire it themselves.

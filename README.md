@@ -4,6 +4,10 @@ A browser-based theatre cue light system. One machine runs the server; other dev
 
 For a full walkthrough of every feature and how to use it, see [FEATURES.md](FEATURES.md).
 
+## Requirements
+
+Python 3.10 or newer. Python 3.12 is recommended — the project is developed, tested, and built on 3.12.
+
 ## Install
 
 ```bash
