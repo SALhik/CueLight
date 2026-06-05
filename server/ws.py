@@ -150,6 +150,7 @@ async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
                     break
         init_msg["scene"] = scene
         init_msg["cue_number"] = cue_num
+        init_msg["note"] = cue.note if cue else ""
     await ws.send_json(init_msg)
 
     missed_pongs = 0

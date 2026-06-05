@@ -16,6 +16,7 @@
   const callerWarning = document.getElementById("callerWarning");
   const healthDot = document.getElementById("healthDot");
   const lockOverlay = document.getElementById("lockOverlay");
+  const noteDisplay = document.getElementById("noteDisplay");
 
   let ws = null;
   let standbyState = "idle";
@@ -52,6 +53,7 @@
         callerWarning.classList.toggle("visible", !msg.caller_connected);
         if (msg.scene) sceneDisplay.textContent = `Scene ${msg.scene}`;
         if (msg.cue_number) cueDisplay.textContent = msg.cue_number;
+        showNote(msg.note || "");
         break;
 
       case "ping":
@@ -88,6 +90,7 @@
       case "cue_info":
         sceneDisplay.textContent = msg.scene ? `Scene ${msg.scene}` : "";
         cueDisplay.textContent = msg.cue_number || "";
+        showNote(msg.note || "");
         break;
 
       case "caller_disconnected":
@@ -137,6 +140,11 @@
     healthDot.className = "health-dot";
     if (latencyMs > 3000) healthDot.classList.add("red");
     else if (latencyMs > 1000) healthDot.classList.add("yellow");
+  }
+
+  function showNote(text) {
+    noteDisplay.textContent = text;
+    noteDisplay.classList.toggle("visible", !!text);
   }
 
   function toggleLock(locked) {

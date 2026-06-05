@@ -267,7 +267,7 @@ class StateManager:
             for pos in self.state.positions.values():
                 pos.cue_indicator = ""
             self._persist()
-            await self._broadcast_positions({"type": "cue_info", "scene": "", "cue_number": ""})
+            await self._broadcast_positions({"type": "cue_info", "scene": "", "cue_number": "", "note": ""})
             await self._notify_caller_full_state()
 
     async def jump_to_cue(self, index: int) -> None:
@@ -416,6 +416,7 @@ class StateManager:
                 "type": "cue_info",
                 "scene": cue.scene if cue else "",
                 "cue_number": target.cue_number if target else "",
+                "note": cue.note if cue else "",
             }
             await self._send_position(cid, msg)
 

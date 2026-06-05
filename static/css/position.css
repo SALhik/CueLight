@@ -21,6 +21,18 @@ body {
 .header-strip .scene { font-weight: 700; color: var(--text); }
 .header-strip .cue-num { color: var(--yellow-bright); }
 
+.cue-note {
+  padding: 4px 16px;
+  text-align: center;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  display: none;
+}
+
+.cue-note.visible { display: block; }
+
 .buttons-area {
   flex: 1;
   display: flex;
