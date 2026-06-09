@@ -850,5 +850,506 @@ class TestShowfileValidation(CueLightTestCase):
             self.assertIn("errors", body)
 
 
+class TestOscPatchAPI(CueLightTestCase):
+    def test_list_patches(self):
+        resp = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/patches").read())
+        self.assertIn("files", resp)
+        self.assertIn("mainstage.json", resp["files"])
+
+    def test_get_patch(self):
+        resp = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/patch/mainstage.json").read())
+        self.assertEqual(resp["name"], "Main Stage")
+        self.assertGreater(len(resp["devices"]), 0)
+
+    def test_save_and_validate_patch(self):
+        data = json.dumps({
+            "name": "Test Patch",
+            "devices": [{"name": "TEST", "ip": "127.0.0.1", "port": 9000}]
+        }).encode()
+        req = urllib_request.Request(
+            f"{HTTP_URL}/api/patch/_test_tmp.json",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = json.loads(urllib_request.urlopen(req).read())
+        self.assertTrue(resp["ok"])
+        tmp = PROJECT_ROOT / "patches" / "_test_tmp.json"
+        if tmp.exists():
+            tmp.unlink()
+
+    def test_invalid_patch_rejected(self):
+        data = json.dumps({"no_name": True}).encode()
+        req = urllib_request.Request(
+            f"{HTTP_URL}/api/patch/_test_bad.json",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib_request.urlopen(req)
+            self.fail("Should have returned 400")
+        except urllib_request.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+
+class TestOscPositionInjection(CueLightTestCase):
+    """Loading a patch injects OSC positions into the grid."""
+
+    def _write_test_patch(self, devices):
+        path = PROJECT_ROOT / "patches" / "_test_osc.json"
+        path.write_text(json.dumps({"name": "Test", "devices": devices}))
+        return path
+
+    def _cleanup_patch(self):
+        path = PROJECT_ROOT / "patches" / "_test_osc.json"
+        if path.exists():
+            path.unlink()
+
+    def test_load_patch_creates_osc_positions(self):
+        async def run():
+            self._write_test_patch([
+                {"name": "OSCSND", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
+            ])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_osc.json"}))
+                state = await recv_type(cws, "full_state")
+                self.assertIn("osc:oscsnd", state["positions"])
+                pos = state["positions"]["osc:oscsnd"]
+                self.assertEqual(pos["type"], "osc")
+                self.assertEqual(pos["label"], "OSCSND")
+                self.assertTrue(pos["connected"])
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_unload_patch_removes_osc_positions(self):
+        async def run():
+            self._write_test_patch([
+                {"name": "OSCLX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
+            ])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_osc.json"}))
+                state = await recv_type(cws, "full_state")
+                self.assertIn("osc:osclx", state["positions"])
+
+                await cws.send(json.dumps({"type": "unload_patch"}))
+                state = await recv_type(cws, "full_state")
+                self.assertNotIn("osc:osclx", state["positions"])
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_osc_label_collision_with_human(self):
+        async def run():
+            self._write_test_patch([
+                {"name": "LX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
+            ])
+            try:
+                cws, _, _ = await connect_caller()
+                pws, _ = await connect_position("p1", "LX")
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_osc.json"}))
+                state = await recv_type(cws, "full_state")
+                # The OSC device named LX should be skipped (collision)
+                self.assertNotIn("osc:lx", state["positions"])
+                self.assertIn("p1", state["positions"])
+
+                await pws.close()
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_human_rejected_when_osc_label_exists(self):
+        async def run():
+            self._write_test_patch([
+                {"name": "TAKEN", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
+            ])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_osc.json"}))
+                await drain(cws)
+
+                pws, msg = await connect_position("p1", "TAKEN")
+                self.assertEqual(msg["type"], "join_rejected")
+                self.assertIn("already in use", msg["reason"])
+
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_osc_positions_armed_by_showfile(self):
+        async def run():
+            self._write_test_patch([
+                {"name": "LX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
+                {"name": "SND", "ip": "127.0.0.1", "port": 9998, "expect_reply": False},
+            ])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_osc.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "load_showfile", "filename": "example.json"}))
+                state = await recv_type(cws, "full_state")
+                # First cue targets LX and SND
+                self.assertTrue(state["positions"]["osc:lx"]["armed"])
+                self.assertTrue(state["positions"]["osc:snd"]["armed"])
+
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+
+class TestOscFire(CueLightTestCase):
+    """OSC fire sends the expected message to a device."""
+
+    def _write_test_patch(self, devices):
+        path = PROJECT_ROOT / "patches" / "_test_fire.json"
+        path.write_text(json.dumps({"name": "Fire Test", "devices": devices}))
+        return path
+
+    def _cleanup_patch(self):
+        path = PROJECT_ROOT / "patches" / "_test_fire.json"
+        if path.exists():
+            path.unlink()
+
+    def test_go_fires_osc_and_reports_result(self):
+        """GO on an OSC column fires OSC and the caller gets an osc_result message."""
+        async def run():
+            # Start a UDP listener to receive the OSC fire
+            received = asyncio.Event()
+            received_data = []
+
+            class Listener(asyncio.DatagramProtocol):
+                def datagram_received(self, data, addr):
+                    received_data.append(data)
+                    received.set()
+
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                Listener, local_addr=("127.0.0.1", 0)
+            )
+            listen_port = transport.get_extra_info("sockname")[1]
+
+            self._write_test_patch([{
+                "name": "TESTDEV",
+                "ip": "127.0.0.1",
+                "port": listen_port,
+                "protocol": "udp",
+                "go_template": "/test/go",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_fire.json"}))
+                await drain(cws)
+
+                # Fire GO
+                await cws.send(json.dumps({"type": "go", "client_id": "osc:testdev"}))
+                osc_msg = await recv_type(cws, "osc_result")
+                self.assertEqual(osc_msg["result"], "sent")
+                self.assertEqual(osc_msg["client_id"], "osc:testdev")
+
+                # Verify the OSC message was actually sent
+                try:
+                    await asyncio.wait_for(received.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+                self.assertGreater(len(received_data), 0, "No OSC data received by listener")
+                # The OSC message should contain /test/go
+                self.assertIn(b"/test/go", received_data[0])
+
+                await cws.close()
+            finally:
+                transport.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_go_with_cue_template_substitution(self):
+        """GO template {cue} is substituted with the showfile cue number."""
+        async def run():
+            received_data = []
+
+            class Listener(asyncio.DatagramProtocol):
+                def datagram_received(self, data, addr):
+                    received_data.append(data)
+
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                Listener, local_addr=("127.0.0.1", 0)
+            )
+            listen_port = transport.get_extra_info("sockname")[1]
+
+            self._write_test_patch([{
+                "name": "LX",
+                "ip": "127.0.0.1",
+                "port": listen_port,
+                "protocol": "udp",
+                "go_template": "/cue/{cue}/start",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_fire.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "load_showfile", "filename": "example.json"}))
+                await drain(cws)
+
+                # GO on the armed OSC position — cue 1 targets LX with cue_number "1"
+                await cws.send(json.dumps({"type": "go", "client_id": "osc:lx"}))
+                await recv_type(cws, "osc_result")
+                await asyncio.sleep(0.2)
+
+                self.assertGreater(len(received_data), 0)
+                self.assertIn(b"/cue/1/start", received_data[0])
+
+                await cws.close()
+            finally:
+                transport.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_master_go_fires_osc_positions(self):
+        """Master GO fires armed OSC positions and still advances the cue."""
+        async def run():
+            received = []
+
+            class Listener(asyncio.DatagramProtocol):
+                def datagram_received(self, data, addr):
+                    received.append(data)
+
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                Listener, local_addr=("127.0.0.1", 0)
+            )
+            listen_port = transport.get_extra_info("sockname")[1]
+
+            self._write_test_patch([{
+                "name": "LX",
+                "ip": "127.0.0.1",
+                "port": listen_port,
+                "protocol": "udp",
+                "go_template": "/go",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_fire.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "load_showfile", "filename": "example.json"}))
+                await drain(cws)
+
+                # Master GO
+                await cws.send(json.dumps({"type": "go_armed"}))
+                osc_msg = await recv_type(cws, "osc_result")
+                self.assertEqual(osc_msg["result"], "sent")
+
+                state = await recv_type(cws, "full_state")
+                self.assertEqual(state["current_cue_index"], 1)
+
+                await asyncio.sleep(0.2)
+                self.assertGreater(len(received), 0)
+
+                await cws.close()
+            finally:
+                transport.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+
+class TestOscProbe(CueLightTestCase):
+    """Probe tiers return the expected states."""
+
+    def _write_test_patch(self, devices):
+        path = PROJECT_ROOT / "patches" / "_test_probe.json"
+        path.write_text(json.dumps({"name": "Probe Test", "devices": devices}))
+        return path
+
+    def _cleanup_patch(self):
+        path = PROJECT_ROOT / "patches" / "_test_probe.json"
+        if path.exists():
+            path.unlink()
+
+    def test_udp_no_ping_returns_unverified(self):
+        """UDP-only device with no ping_template → UNVERIFIED."""
+        async def run():
+            self._write_test_patch([{
+                "name": "UDPDEV",
+                "ip": "127.0.0.1",
+                "port": 59999,
+                "protocol": "udp",
+                "go_template": "/go",
+                "ping_template": "",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_probe.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "standby", "client_id": "osc:udpdev"}))
+                state = await recv_type(cws, "full_state")
+                pos = state["positions"]["osc:udpdev"]
+                self.assertEqual(pos["osc_probe"], "unverified")
+                self.assertEqual(pos["osc_trust"], "none")
+
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_tcp_port_open_returns_confirmed(self):
+        """TCP connect to an open port → CONFIRMED/tcp_port."""
+        async def run():
+            import socket as sock_mod
+            server_sock = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
+            server_sock.setsockopt(sock_mod.SOL_SOCKET, sock_mod.SO_REUSEADDR, 1)
+            server_sock.bind(("127.0.0.1", 0))
+            server_sock.listen(1)
+            tcp_port = server_sock.getsockname()[1]
+
+            self._write_test_patch([{
+                "name": "TCPDEV",
+                "ip": "127.0.0.1",
+                "port": tcp_port,
+                "protocol": "tcp",
+                "go_template": "/go",
+                "ping_template": "",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_probe.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "standby", "client_id": "osc:tcpdev"}))
+                state = await recv_type(cws, "full_state")
+                pos = state["positions"]["osc:tcpdev"]
+                self.assertEqual(pos["osc_probe"], "confirmed")
+                self.assertEqual(pos["osc_trust"], "tcp_port")
+
+                await cws.close()
+            finally:
+                server_sock.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_tcp_port_closed_returns_failed(self):
+        """TCP connect to a closed port → FAILED/tcp_port."""
+        async def run():
+            self._write_test_patch([{
+                "name": "DEADDEV",
+                "ip": "127.0.0.1",
+                "port": 59998,
+                "protocol": "tcp",
+                "go_template": "/go",
+                "ping_template": "",
+                "expect_reply": False,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_probe.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "standby", "client_id": "osc:deaddev"}))
+                state = await recv_type(cws, "full_state")
+                pos = state["positions"]["osc:deaddev"]
+                self.assertEqual(pos["osc_probe"], "failed")
+                self.assertEqual(pos["osc_trust"], "tcp_port")
+
+                await cws.close()
+            finally:
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_osc_reply_probe_confirmed(self):
+        """UDP device with ping_template that receives a reply → CONFIRMED/osc_reply."""
+        async def run():
+            class EchoProtocol(asyncio.DatagramProtocol):
+                def __init__(self):
+                    self.transport = None
+                def connection_made(self, transport):
+                    self.transport = transport
+                def datagram_received(self, data, addr):
+                    self.transport.sendto(data, addr)
+
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                EchoProtocol, local_addr=("127.0.0.1", 0)
+            )
+            echo_port = transport.get_extra_info("sockname")[1]
+
+            self._write_test_patch([{
+                "name": "ECHODEV",
+                "ip": "127.0.0.1",
+                "port": echo_port,
+                "protocol": "udp",
+                "go_template": "/go",
+                "ping_template": "/ping",
+                "expect_reply": True,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_probe.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "standby", "client_id": "osc:echodev"}))
+                state = await recv_type(cws, "full_state")
+                pos = state["positions"]["osc:echodev"]
+                self.assertEqual(pos["osc_probe"], "confirmed")
+                self.assertEqual(pos["osc_trust"], "osc_reply")
+
+                await cws.close()
+            finally:
+                transport.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+    def test_fire_no_reply_timeout(self):
+        """Fire with expect_reply=True to a silent listener → NO_REPLY."""
+        async def run():
+            # Listener that receives but never replies
+            class SilentProtocol(asyncio.DatagramProtocol):
+                def datagram_received(self, data, addr):
+                    pass
+
+            loop = asyncio.get_event_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                SilentProtocol, local_addr=("127.0.0.1", 0)
+            )
+            silent_port = transport.get_extra_info("sockname")[1]
+
+            self._write_test_patch([{
+                "name": "SILENTDEV",
+                "ip": "127.0.0.1",
+                "port": silent_port,
+                "protocol": "udp",
+                "go_template": "/go",
+                "expect_reply": True,
+            }])
+            try:
+                cws, _, _ = await connect_caller()
+                await cws.send(json.dumps({"type": "load_patch", "filename": "_test_probe.json"}))
+                await drain(cws)
+
+                await cws.send(json.dumps({"type": "go", "client_id": "osc:silentdev"}))
+                osc_msg = await recv_type(cws, "osc_result")
+                self.assertEqual(osc_msg["result"], "no_reply")
+
+                await cws.close()
+            finally:
+                transport.close()
+                self._cleanup_patch()
+        asyncio.run(run())
+
+
 if __name__ == "__main__":
     unittest.main()

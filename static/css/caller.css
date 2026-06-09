@@ -425,6 +425,72 @@ body {
   text-transform: uppercase;
 }
 
+/* OSC column styling */
+.position-col.osc-col .col-header {
+  border-left: 3px solid var(--osc-accent);
+}
+
+.position-col.osc-col .osc-badge {
+  font-size: 9px;
+  color: var(--osc-accent);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.position-col.osc-col .col-btn {
+  border-left: 2px solid var(--osc-accent-dim);
+}
+
+/* OSC standby probe states */
+.btn-standby-caller.osc-confirmed {
+  background: var(--red-bright);
+  color: #fff;
+}
+
+.btn-standby-caller.osc-unverified {
+  background: var(--red-bright);
+  color: #fff;
+  position: relative;
+}
+
+.btn-standby-caller.osc-unverified::after {
+  content: "\2205";
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.btn-standby-caller.osc-probing {
+  background: var(--red-bright);
+  color: #fff;
+  animation: flash 0.5s ease-in-out infinite;
+}
+
+.btn-standby-caller.osc-failed {
+  background: var(--red-bright);
+  color: #fff;
+  animation: flash 0.5s ease-in-out infinite;
+}
+
+/* OSC GO result states */
+.btn-go-caller.osc-sent {
+  background: var(--green-bright);
+  color: #fff;
+}
+
+.btn-go-caller.osc-no-reply {
+  background: var(--red-bright);
+  color: #fff;
+  animation: flash 0.5s ease-in-out infinite;
+}
+
+/* OSC health dot states */
+.health-dot.osc-unverified {
+  background: var(--grey);
+}
+
 .lock-overlay {
   position: fixed;
   inset: 0;

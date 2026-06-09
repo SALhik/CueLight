@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import socket
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import qrcode
@@ -9,6 +10,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
 from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
 from .state import StateManager
@@ -17,8 +19,21 @@ from .ws import caller_ws_handler, position_ws_handler
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="CueLight")
 manager = StateManager(load_state())
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    if manager.state.osc_patch_filename:
+        try:
+            patch = load_patch(manager.state.osc_patch_filename)
+            await manager.load_patch(patch)
+        except Exception:
+            manager.state.osc_patch_filename = ""
+    yield
+
+
+app = FastAPI(title="CueLight", lifespan=_lifespan)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -128,6 +143,46 @@ async def api_save_showfile(filename: str, request: Request):
     if errors:
         return JSONResponse({"errors": errors}, status_code=400)
     save_showfile(filename, data)
+    return {"ok": True}
+
+
+@app.get("/api/patches")
+async def api_patches():
+    return {"files": list_patches()}
+
+
+@app.get("/api/patch/{filename}")
+async def api_get_patch(filename: str):
+    import json
+    from .patch import PATCHES_DIR
+    path = PATCHES_DIR / filename
+    if not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    data = json.loads(path.read_text())
+    return data
+
+
+@app.post("/api/patch/{filename}")
+async def api_save_patch(filename: str, request: Request):
+    if filename == "_probe_test":
+        from .models import OscDevice
+        from .osc import probe as osc_probe
+        data = await request.json()
+        device = OscDevice(
+            name=data.get("name", "test"),
+            ip=data.get("ip", ""),
+            port=data.get("port", 8000),
+            protocol=data.get("protocol", "udp"),
+            ping_template=data.get("ping_template", ""),
+            expect_reply=data.get("expect_reply", False),
+        )
+        probe_state, trust = await osc_probe(device)
+        return {"probe": probe_state.value, "trust": trust}
+    data = await request.json()
+    errors = validate_patch(data)
+    if errors:
+        return JSONResponse({"errors": errors}, status_code=400)
+    save_patch(filename, data)
     return {"ok": True}
 
 

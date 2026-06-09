@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from threading import Timer
 
-from .models import AppState, ButtonState, HealthStatus, Position
+from .models import AppState, ButtonState, HealthStatus, Position, PositionType
 
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
 SNAPSHOT_PATH = STATE_DIR / "snapshot.json"
@@ -26,6 +26,11 @@ def save_state(state: AppState) -> None:
 def _write_state(state: AppState) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     data = state.to_dict()
+    # Filter out OSC positions — they are runtime-reconstructed from the loaded patch
+    data["positions"] = {
+        k: v for k, v in data["positions"].items()
+        if v.get("type", "human") != "osc"
+    }
     tmp = SNAPSHOT_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2))
     tmp.replace(SNAPSHOT_PATH)
@@ -45,6 +50,7 @@ def load_state() -> AppState:
     state.password = data.get("password", "")
     state.current_cue_index = data.get("current_cue_index", 0)
     state.paused = data.get("paused", False)
+    state.osc_patch_filename = data.get("osc_patch_filename", "")
 
     for cid, pdata in data.get("positions", {}).items():
         state.positions[cid] = Position(

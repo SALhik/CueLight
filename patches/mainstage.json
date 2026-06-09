@@ -1,0 +1,36 @@
+{
+  "name": "Main Stage",
+  "devices": [
+    {
+      "name": "SOUND",
+      "preset": "qlab5",
+      "ip": "192.168.1.50",
+      "port": 53000,
+      "protocol": "tcp",
+      "go_template": "/cue/{cue}/start",
+      "ping_template": "/version",
+      "expect_reply": true
+    },
+    {
+      "name": "LX",
+      "preset": "grandma3",
+      "ip": "192.168.1.20",
+      "port": 8000,
+      "protocol": "udp",
+      "go_template": "/gma3/cmd",
+      "go_args": ["Go+ Sequence 1"],
+      "ping_template": "",
+      "expect_reply": false
+    },
+    {
+      "name": "BAND",
+      "preset": "theatremix",
+      "ip": "192.168.1.60",
+      "port": 8000,
+      "protocol": "udp",
+      "go_template": "/TheatreMix/Go",
+      "ping_template": "",
+      "expect_reply": false
+    }
+  ]
+}

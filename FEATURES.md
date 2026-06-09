@@ -3,8 +3,10 @@
 CueLight is a browser-based theatre cue light system. One machine runs a Python
 server; iPads and phones on the same LAN connect through a browser. One device
 acts as the **Caller** (stage manager), and the others are **Positions**
-(operators such as LX, Sound, Fly). All real-time signalling happens over
-WebSockets, so cues appear instantly with no page reloads.
+(operators such as LX, Sound, Fly). Show-control gear (QLab, grandMA3,
+TheatreMix, or any custom OSC software) can also be fired as **OSC positions**
+that appear in the same grid. All real-time signalling happens over WebSockets
+and OSC, so cues appear instantly with no page reloads.
 
 This document walks through every feature and how to use it.
 
@@ -29,7 +31,7 @@ IP (Settings shows it, or `/api/info` returns it) and share
 |---|---|---|
 | `/` | Caller console | Stage manager (one device only) |
 | `/join` → `/position` | Position console | Each operator |
-| `/editor` | Showfile editor | Whoever prepares the cue list |
+| `/editor` | Showfile & patch editor | Whoever prepares the cue list or venue patch |
 
 The **first** device to open `/` claims the Caller role. If a second device
 opens `/` while a Caller is already connected, it is automatically redirected
@@ -55,10 +57,11 @@ the same seat without re-entering anything.
 
 ### Label uniqueness
 
-Labels must be unique, case-insensitively. If you pick a name already in use you
-get an error before joining (`POST /api/check_label`), and the server rejects
-duplicates again at connect time as a safety net. Renames are validated the same
-way.
+Labels must be unique, case-insensitively — across both human and OSC positions.
+If you pick a name already in use (including one claimed by an OSC device in the
+loaded patch) you get an error before joining (`POST /api/check_label`), and the
+server rejects duplicates again at connect time as a safety net. Renames are
+validated the same way.
 
 ### Position capacity
 
@@ -187,15 +190,19 @@ everything.
 
 ### Settings
 
-The **SETTINGS** button opens a modal with four sections:
+The **SETTINGS** button opens a modal with five sections:
 
-1. **Health & Latency** — a live list of every position with its health dot,
-   measured latency in ms, and a ⚠️ marker for disconnected positions.
+1. **Health & Latency** — a live list of every position (human and OSC) with its
+   health dot, measured latency (human) or trust tier (OSC), and a ⚠️ marker for
+   disconnected human positions.
 2. **Showfile** — shows the loaded file, a dropdown to **Load** any file in
    `showfiles/`, an **Unload** button, and an **Edit showfile…** button that
    opens the editor in a new tab.
-3. **Network** — the server host/address to share with operators.
-4. **Security** — the password toggle and field (see *Password protection*).
+3. **OSC Patch** — shows the loaded patch, a dropdown to **Load** any patch in
+   `patches/`, an **Unload** button, and an **Edit patches…** button that opens
+   the editor's Patches tab. See *OSC outbound*.
+4. **Network** — the server host/address to share with operators.
+5. **Security** — the password toggle and field (see *Password protection*).
 
 ### Join info / QR code
 
@@ -312,18 +319,22 @@ An example file ships at `showfiles/example.json`.
 
 ---
 
-## The showfile editor
+## The editor
 
-A web form for building cue lists without editing JSON by hand. Open it via
-**Settings → Edit showfile…** on the Caller, or go to `/editor` directly.
+A web form for building cue lists and OSC patches without editing JSON by hand.
+Open it via **Settings → Edit showfile…** or **Settings → Edit patches…** on
+the Caller, or go to `/editor` directly. The editor has two tabs: **Showfiles**
+and **OSC Patches**.
 
-### Creating / loading
+### Showfiles tab
+
+#### Creating / loading
 
 - **Load** — pick an existing file from the dropdown to edit it.
 - **New** — type a filename and start a blank cue list (`.json` is appended
   automatically if you omit it).
 
-### Editing cues
+#### Editing cues
 
 - Set the **show name** and **version** at the top.
 - **Add Cue** appends a row. Each row has columns for **sequence**, **scene**,
@@ -333,11 +344,175 @@ A web form for building cue lists without editing JSON by hand. Open it via
   defaults to `1`.
 - The **✕** button on a row deletes that cue.
 
-### Saving
+#### Saving
 
 **Save** validates the cue list server-side and writes it to `showfiles/`. If
 validation fails (missing `show_name`, missing/duplicate `sequence`, missing
 `scene`/`targets`, etc.), the errors are shown and nothing is written.
+
+### OSC Patches tab
+
+#### Creating / loading
+
+Same workflow as showfiles — **Load** an existing patch or **New** to start
+fresh.
+
+#### Editing devices
+
+- Set the **patch name** at the top.
+- **Add device** appends a row. Each row has columns for **name**, **preset**,
+  **IP**, **port**, **protocol**, **GO template**, **GO args**, **ping
+  template**, and **expect reply**.
+- Selecting a **preset** (QLab 5, grandMA3, TheatreMix) prefills the fields
+  with sensible defaults for that console. Every field stays editable.
+- The **Test** button probes the device and shows its trust tier (e.g.
+  `osc_reply`, `tcp_port`, or `unverified`).
+- The **✕** button removes a device row.
+
+#### Saving
+
+**Save** validates the patch server-side (checks for missing names/IPs,
+duplicate names, invalid ports) and writes it to `patches/`.
+
+---
+
+## OSC outbound
+
+OSC (Open Sound Control) lets CueLight fire show-control gear — lighting desks,
+sound playback, band monitors — as a natural part of calling cues. An OSC target
+appears as a **virtual position** in the Caller grid: same STANDBY / PRESET / GO
+buttons, same arming and showfile auto-advance, but instead of a human tapping a
+phone, the server sends an OSC message to the target device.
+
+### OSC patches
+
+An OSC patch is a JSON file in the `patches/` directory that describes the
+devices at a venue — their IPs, ports, protocols, and OSC addresses. Patches are
+**decoupled from showfiles** by design: cues travel with the production, but
+IPs and ports are venue-specific.
+
+```json
+{
+  "name": "Main Stage",
+  "devices": [
+    {
+      "name": "SOUND",
+      "preset": "qlab5",
+      "ip": "192.168.1.50",
+      "port": 53000,
+      "protocol": "tcp",
+      "go_template": "/cue/{cue}/start",
+      "ping_template": "/version",
+      "expect_reply": true
+    },
+    {
+      "name": "LX",
+      "preset": "grandma3",
+      "ip": "192.168.1.20",
+      "port": 8000,
+      "protocol": "udp",
+      "go_template": "/gma3/cmd",
+      "go_args": ["Go+ Sequence 1"],
+      "ping_template": "",
+      "expect_reply": false
+    }
+  ]
+}
+```
+
+Each device has:
+
+- **`name`** — the position label and showfile cue target (case-insensitive
+  match, same as human positions). Must be unique across all positions.
+- **`preset`** — `qlab5`, `grandma3`, `theatremix`, or `custom`. Presets
+  prefill the fields below in the editor; every field stays editable.
+- **`ip`** / **`port`** / **`protocol`** (`udp` or `tcp`) — network target.
+- **`go_template`** — the OSC address sent on GO. Use `{cue}` as a placeholder
+  for the showfile cue number (e.g. `/cue/{cue}/start` → `/cue/12/start`).
+  No placeholder means the address is sent verbatim.
+- **`go_args`** — optional static OSC arguments appended to every fire.
+- **`ping_template`** — an OSC address used for the readiness probe (STANDBY).
+  Empty means the device is probed by TCP-port check or marked unverified.
+- **`expect_reply`** — whether to wait for a reply to confirm fire/probe.
+
+An example file ships at `patches/mainstage.json`.
+
+### Loading a patch
+
+In **Settings → OSC Patch**, pick a file and tap **Load**. Each device in the
+patch becomes a column in the Caller grid, visually distinguished by a blue
+accent border and an **OSC** badge in the header. The columns behave identically
+to human positions for arming, Master GO, and showfile cue targeting.
+
+Unload a patch via Settings or by calling EXIT (which wipes all state).
+
+### How OSC columns work
+
+| Button | Human position | OSC position |
+|---|---|---|
+| **STANDBY** | Sends "standby called" to the operator | Runs a **readiness probe** (see below) |
+| **PRESET** | Arms/disarms (same for both) | Arms/disarms (same) |
+| **GO** | Sends "go called" to the operator | **Fires the OSC message** to the target device |
+
+GO on an OSC column **always dispatches** — it is never blocked by probe state.
+If a device is unreachable, the fire still goes out and the result reports
+honestly.
+
+### Readiness probes (STANDBY on OSC)
+
+Tapping STANDBY on an OSC column runs a tiered probe to check if the device is
+reachable:
+
+| Tier | Condition | Result on success | Result on failure |
+|---|---|---|---|
+| **OSC reply** | `ping_template` set + `expect_reply` | CONFIRMED / "app confirmed responsive" | FAILED / "app confirmed responsive" |
+| **TCP port** | Fallback: TCP connect to ip:port | CONFIRMED / "app's port is listening" | FAILED / "app's port is listening" |
+| **Unverified** | UDP-only, no ping template | UNVERIFIED / "not confirmed — firing blind" | — |
+
+The probe result shows on the STANDBY button:
+
+- **Solid bright red** — CONFIRMED (reachable).
+- **Solid bright red + ∅ glyph** — UNVERIFIED (no ping configured; assumed
+  ready but not confirmed).
+- **Flashing bright red** — PROBING (in progress) or FAILED (unreachable —
+  treat like a human who hasn't acked).
+
+STANDBY always re-probes, even if already CONFIRMED, so you can demand a fresh
+check right before firing GO.
+
+### GO fire and results
+
+When GO fires on an OSC column:
+
+1. The `go_template` is resolved (replacing `{cue}` with the showfile cue
+   number, if present).
+2. The message is sent to the device over UDP or TCP.
+3. If `expect_reply` is true, the server waits up to 400ms for a reply.
+4. The result is sent to the Caller as an `osc_result` message.
+
+The GO button shows the result for **2 seconds**:
+
+- **SENT** (green hold) — the fire was dispatched and confirmed (or open-loop,
+  meaning `expect_reply` was false — the fire still happened).
+- **NO REPLY** (flashing red) — the fire was dispatched but no reply was received
+  within 400ms. This means "couldn't confirm it landed," not "didn't fire."
+
+### Background heartbeat
+
+Devices that have been probed at least once with a confirmable tier (OSC reply or
+TCP port) are re-probed every ~5 seconds to keep the health dot accurate. This
+catches a mid-scene cable pull or crashed console. UDP-only/unverified devices
+are not heartbeated.
+
+### Editing patches
+
+The editor at `/editor` has two tabs: **Showfiles** and **OSC Patches**. The
+Patches tab works the same way as the Showfiles tab — select or create a file,
+add device rows, and save.
+
+Each device row has a **Preset** selector that prefills fields for common
+consoles (QLab 5, grandMA3, TheatreMix). A **Test** button per row runs the
+probe and shows the resulting trust tier.
 
 ---
 
@@ -387,7 +562,9 @@ The server writes `state/snapshot.json` on every change (debounced at 100ms).
 If the server restarts, it restores positions (marked disconnected until they
 reconnect), the lock state, the password, the paused flag, and the current cue
 index. The **showfile is not stored in the snapshot** — reload it by filename
-after a restart. The EXIT button deletes the snapshot entirely.
+after a restart. **OSC positions** are also not stored; they are reconstructed
+from the loaded patch file on startup (the patch filename is persisted). The
+EXIT button deletes the snapshot entirely.
 
 ---
 
@@ -401,13 +578,16 @@ useful for integration or debugging.
 | `GET /` | Caller console page |
 | `GET /join` | Join page |
 | `GET /position` | Position console page |
-| `GET /editor` | Showfile editor page |
+| `GET /editor` | Showfile & patch editor page |
 | `GET /api/info` | Server IP, port, caller-connected and password-enabled flags |
 | `POST /api/check_password` | Validate a join password |
 | `POST /api/check_label` | Check a label is free before joining |
 | `GET /api/showfiles` | List available showfile names |
 | `GET /api/showfile/{filename}` | Fetch a showfile's JSON |
 | `POST /api/showfile/{filename}` | Validate and save a showfile |
+| `GET /api/patches` | List available OSC patch names |
+| `GET /api/patch/{filename}` | Fetch a patch's JSON |
+| `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) |
 | `GET /api/qr?password=…` | PNG QR code for the join URL |
 | `WS /ws/caller` | Caller real-time channel |
 | `WS /ws/position` | Position real-time channel |
@@ -418,13 +598,18 @@ useful for integration or debugging.
 
 1. Start the server; open `/` on the stage manager's iPad (becomes Caller).
 2. (Optional) Build/load a showfile via the editor and Settings.
-3. (Optional) Set a join password in Settings → Security.
-4. Show **Join info**; operators scan the QR or open `/join`, enter their label,
+3. (Optional) Build/load an OSC patch via the editor and Settings → OSC Patch.
+   OSC devices appear as columns in the grid alongside human positions.
+4. (Optional) Set a join password in Settings → Security.
+5. Show **Join info**; operators scan the QR or open `/join`, enter their label,
    and connect.
-5. Run the show:
+6. Run the show:
    - **Manual:** use each column's STANDBY / GO, or arm positions with PRESET and
      drive them together with the MASTER buttons.
-   - **Showfile:** PRESET arming is automatic; tap **GO ARMED** to fire and
-     advance each cue; use PREV / JUMP / PAUSE as needed.
-6. **LOCK** during holds; **RESET ALL** between acts.
-7. **EXIT** to end the show and clear all state.
+   - **Showfile:** PRESET arming is automatic (including OSC positions); tap
+     **GO ARMED** to fire human and OSC positions together and advance each cue;
+     use PREV / JUMP / PAUSE as needed.
+   - **OSC:** STANDBY on an OSC column probes the device; GO fires the OSC
+     message. Results (SENT / NO REPLY) show on the button for 2 seconds.
+7. **LOCK** during holds; **RESET ALL** between acts.
+8. **EXIT** to end the show and clear all state.
