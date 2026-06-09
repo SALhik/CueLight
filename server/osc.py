@@ -11,7 +11,7 @@ FIRE_TIMEOUT = 0.4
 PROBE_TIMEOUT = 0.4
 
 
-def _build_osc_dgram(address: str, args: list) -> bytes:
+def _build_osc_dgram(address: str, args: list[int | float | str]) -> bytes:
     builder = OscMessageBuilder(address=address)
     for arg in args:
         if isinstance(arg, int):
@@ -117,9 +117,8 @@ async def _send_tcp(ip: str, port: int, dgram: bytes, expect_reply: bool, timeou
         return OscFireResult.NO_REPLY
 
     try:
-        # OSC-over-TCP: 4-byte big-endian length prefix
         writer.write(struct.pack(">I", len(dgram)) + dgram)
-        await writer.drain()
+        await asyncio.wait_for(writer.drain(), timeout=timeout)
 
         if expect_reply:
             try:

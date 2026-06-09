@@ -29,7 +29,7 @@ async def _lifespan(app: FastAPI):
             patch = load_patch(manager.state.osc_patch_filename)
             await manager.load_patch(patch)
         except Exception:
-            manager.state.osc_patch_filename = ""
+            await manager.clear_osc_patch_filename()
     yield
 
 
@@ -153,31 +153,20 @@ async def api_patches():
 
 @app.get("/api/patch/{filename}")
 async def api_get_patch(filename: str):
-    import json
-    from .patch import PATCHES_DIR
-    path = PATCHES_DIR / filename
-    if not path.exists():
+    try:
+        return load_patch(filename).to_dict()
+    except FileNotFoundError:
         return JSONResponse({"error": "not found"}, status_code=404)
-    data = json.loads(path.read_text())
-    return data
+    except ValueError:
+        return JSONResponse({"error": "invalid patch file"}, status_code=400)
 
 
 @app.post("/api/patch/{filename}")
 async def api_save_patch(filename: str, request: Request):
     if filename == "_probe_test":
-        from .models import OscDevice
-        from .osc import probe as osc_probe
         data = await request.json()
-        device = OscDevice(
-            name=data.get("name", "test"),
-            ip=data.get("ip", ""),
-            port=data.get("port", 8000),
-            protocol=data.get("protocol", "udp"),
-            ping_template=data.get("ping_template", ""),
-            expect_reply=data.get("expect_reply", False),
-        )
-        probe_state, trust = await osc_probe(device)
-        return {"probe": probe_state.value, "trust": trust}
+        result = await manager.probe_test(data)
+        return result
     data = await request.json()
     errors = validate_patch(data)
     if errors:

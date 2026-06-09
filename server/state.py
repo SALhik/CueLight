@@ -392,6 +392,24 @@ class StateManager:
             self._persist()
             await self._notify_caller_full_state()
 
+    async def probe_test(self, data: dict[str, Any]) -> dict[str, str]:
+        device = OscDevice(
+            name=data.get("name", "test"),
+            ip=data.get("ip", ""),
+            port=data.get("port", 8000),
+            protocol=data.get("protocol", "udp"),
+            ping_template=data.get("ping_template", ""),
+            expect_reply=data.get("expect_reply", False),
+        )
+        async with self._lock:
+            probe_state, trust = await osc_mod.probe(device)
+        return {"probe": probe_state.value, "trust": trust}
+
+    async def clear_osc_patch_filename(self) -> None:
+        async with self._lock:
+            self.state.osc_patch_filename = ""
+            self._persist()
+
     # --- OSC helpers (call under lock) ---
 
     def _clear_transient_osc_results(self) -> None:
@@ -434,6 +452,7 @@ class StateManager:
     async def _osc_heartbeat_loop(self) -> None:
         try:
             while True:
+                # 5s interval: less aggressive than the 1s position heartbeat to reduce network load on OSC gear
                 await asyncio.sleep(5.0)
                 async with self._lock:
                     changed = False

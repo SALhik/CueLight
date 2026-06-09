@@ -851,17 +851,17 @@ class TestShowfileValidation(CueLightTestCase):
 
 
 class TestOscPatchAPI(CueLightTestCase):
-    def test_list_patches(self):
+    def test_list_patches(self) -> None:
         resp = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/patches").read())
         self.assertIn("files", resp)
         self.assertIn("mainstage.json", resp["files"])
 
-    def test_get_patch(self):
+    def test_get_patch(self) -> None:
         resp = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/patch/mainstage.json").read())
         self.assertEqual(resp["name"], "Main Stage")
         self.assertGreater(len(resp["devices"]), 0)
 
-    def test_save_and_validate_patch(self):
+    def test_save_and_validate_patch(self) -> None:
         data = json.dumps({
             "name": "Test Patch",
             "devices": [{"name": "TEST", "ip": "127.0.0.1", "port": 9000}]
@@ -877,7 +877,7 @@ class TestOscPatchAPI(CueLightTestCase):
         if tmp.exists():
             tmp.unlink()
 
-    def test_invalid_patch_rejected(self):
+    def test_invalid_patch_rejected(self) -> None:
         data = json.dumps({"no_name": True}).encode()
         req = urllib_request.Request(
             f"{HTTP_URL}/api/patch/_test_bad.json",
@@ -894,18 +894,18 @@ class TestOscPatchAPI(CueLightTestCase):
 class TestOscPositionInjection(CueLightTestCase):
     """Loading a patch injects OSC positions into the grid."""
 
-    def _write_test_patch(self, devices):
+    def _write_test_patch(self, devices: list[dict[str, object]]) -> Path:
         path = PROJECT_ROOT / "patches" / "_test_osc.json"
         path.write_text(json.dumps({"name": "Test", "devices": devices}))
         return path
 
-    def _cleanup_patch(self):
+    def _cleanup_patch(self) -> None:
         path = PROJECT_ROOT / "patches" / "_test_osc.json"
         if path.exists():
             path.unlink()
 
-    def test_load_patch_creates_osc_positions(self):
-        async def run():
+    def test_load_patch_creates_osc_positions(self) -> None:
+        async def run() -> None:
             self._write_test_patch([
                 {"name": "OSCSND", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
             ])
@@ -923,8 +923,8 @@ class TestOscPositionInjection(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_unload_patch_removes_osc_positions(self):
-        async def run():
+    def test_unload_patch_removes_osc_positions(self) -> None:
+        async def run() -> None:
             self._write_test_patch([
                 {"name": "OSCLX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
             ])
@@ -942,8 +942,8 @@ class TestOscPositionInjection(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_osc_label_collision_with_human(self):
-        async def run():
+    def test_osc_label_collision_with_human(self) -> None:
+        async def run() -> None:
             self._write_test_patch([
                 {"name": "LX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
             ])
@@ -964,8 +964,8 @@ class TestOscPositionInjection(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_human_rejected_when_osc_label_exists(self):
-        async def run():
+    def test_human_rejected_when_osc_label_exists(self) -> None:
+        async def run() -> None:
             self._write_test_patch([
                 {"name": "TAKEN", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
             ])
@@ -975,16 +975,19 @@ class TestOscPositionInjection(CueLightTestCase):
                 await drain(cws)
 
                 pws, msg = await connect_position("p1", "TAKEN")
-                self.assertEqual(msg["type"], "join_rejected")
-                self.assertIn("already in use", msg["reason"])
+                try:
+                    self.assertEqual(msg["type"], "join_rejected")
+                    self.assertIn("already in use", msg["reason"])
+                finally:
+                    await pws.close()
 
                 await cws.close()
             finally:
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_osc_positions_armed_by_showfile(self):
-        async def run():
+    def test_osc_positions_armed_by_showfile(self) -> None:
+        async def run() -> None:
             self._write_test_patch([
                 {"name": "LX", "ip": "127.0.0.1", "port": 9999, "expect_reply": False},
                 {"name": "SND", "ip": "127.0.0.1", "port": 9998, "expect_reply": False},
@@ -1009,25 +1012,25 @@ class TestOscPositionInjection(CueLightTestCase):
 class TestOscFire(CueLightTestCase):
     """OSC fire sends the expected message to a device."""
 
-    def _write_test_patch(self, devices):
+    def _write_test_patch(self, devices: list[dict[str, object]]) -> Path:
         path = PROJECT_ROOT / "patches" / "_test_fire.json"
         path.write_text(json.dumps({"name": "Fire Test", "devices": devices}))
         return path
 
-    def _cleanup_patch(self):
+    def _cleanup_patch(self) -> None:
         path = PROJECT_ROOT / "patches" / "_test_fire.json"
         if path.exists():
             path.unlink()
 
-    def test_go_fires_osc_and_reports_result(self):
+    def test_go_fires_osc_and_reports_result(self) -> None:
         """GO on an OSC column fires OSC and the caller gets an osc_result message."""
-        async def run():
+        async def run() -> None:
             # Start a UDP listener to receive the OSC fire
             received = asyncio.Event()
             received_data = []
 
             class Listener(asyncio.DatagramProtocol):
-                def datagram_received(self, data, addr):
+                def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     received_data.append(data)
                     received.set()
 
@@ -1071,13 +1074,13 @@ class TestOscFire(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_go_with_cue_template_substitution(self):
+    def test_go_with_cue_template_substitution(self) -> None:
         """GO template {cue} is substituted with the showfile cue number."""
-        async def run():
-            received_data = []
+        async def run() -> None:
+            received_data: list[bytes] = []
 
             class Listener(asyncio.DatagramProtocol):
-                def datagram_received(self, data, addr):
+                def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     received_data.append(data)
 
             loop = asyncio.get_event_loop()
@@ -1116,13 +1119,13 @@ class TestOscFire(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_master_go_fires_osc_positions(self):
+    def test_master_go_fires_osc_positions(self) -> None:
         """Master GO fires armed OSC positions and still advances the cue."""
-        async def run():
-            received = []
+        async def run() -> None:
+            received: list[bytes] = []
 
             class Listener(asyncio.DatagramProtocol):
-                def datagram_received(self, data, addr):
+                def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     received.append(data)
 
             loop = asyncio.get_event_loop()
@@ -1168,19 +1171,19 @@ class TestOscFire(CueLightTestCase):
 class TestOscProbe(CueLightTestCase):
     """Probe tiers return the expected states."""
 
-    def _write_test_patch(self, devices):
+    def _write_test_patch(self, devices: list[dict[str, object]]) -> Path:
         path = PROJECT_ROOT / "patches" / "_test_probe.json"
         path.write_text(json.dumps({"name": "Probe Test", "devices": devices}))
         return path
 
-    def _cleanup_patch(self):
+    def _cleanup_patch(self) -> None:
         path = PROJECT_ROOT / "patches" / "_test_probe.json"
         if path.exists():
             path.unlink()
 
-    def test_udp_no_ping_returns_unverified(self):
+    def test_udp_no_ping_returns_unverified(self) -> None:
         """UDP-only device with no ping_template → UNVERIFIED."""
-        async def run():
+        async def run() -> None:
             self._write_test_patch([{
                 "name": "UDPDEV",
                 "ip": "127.0.0.1",
@@ -1206,9 +1209,9 @@ class TestOscProbe(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_tcp_port_open_returns_confirmed(self):
+    def test_tcp_port_open_returns_confirmed(self) -> None:
         """TCP connect to an open port → CONFIRMED/tcp_port."""
-        async def run():
+        async def run() -> None:
             import socket as sock_mod
             server_sock = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
             server_sock.setsockopt(sock_mod.SOL_SOCKET, sock_mod.SO_REUSEADDR, 1)
@@ -1242,9 +1245,9 @@ class TestOscProbe(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_tcp_port_closed_returns_failed(self):
+    def test_tcp_port_closed_returns_failed(self) -> None:
         """TCP connect to a closed port → FAILED/tcp_port."""
-        async def run():
+        async def run() -> None:
             self._write_test_patch([{
                 "name": "DEADDEV",
                 "ip": "127.0.0.1",
@@ -1270,16 +1273,17 @@ class TestOscProbe(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_osc_reply_probe_confirmed(self):
+    def test_osc_reply_probe_confirmed(self) -> None:
         """UDP device with ping_template that receives a reply → CONFIRMED/osc_reply."""
-        async def run():
+        async def run() -> None:
             class EchoProtocol(asyncio.DatagramProtocol):
-                def __init__(self):
-                    self.transport = None
-                def connection_made(self, transport):
-                    self.transport = transport
-                def datagram_received(self, data, addr):
-                    self.transport.sendto(data, addr)
+                def __init__(self) -> None:
+                    self.transport: asyncio.DatagramTransport | None = None
+                def connection_made(self, transport: asyncio.BaseTransport) -> None:
+                    self.transport = transport  # type: ignore[assignment]
+                def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+                    if self.transport:
+                        self.transport.sendto(data, addr)
 
             loop = asyncio.get_event_loop()
             transport, _ = await loop.create_datagram_endpoint(
@@ -1313,12 +1317,11 @@ class TestOscProbe(CueLightTestCase):
                 self._cleanup_patch()
         asyncio.run(run())
 
-    def test_fire_no_reply_timeout(self):
+    def test_fire_no_reply_timeout(self) -> None:
         """Fire with expect_reply=True to a silent listener → NO_REPLY."""
-        async def run():
-            # Listener that receives but never replies
+        async def run() -> None:
             class SilentProtocol(asyncio.DatagramProtocol):
-                def datagram_received(self, data, addr):
+                def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     pass
 
             loop = asyncio.get_event_loop()

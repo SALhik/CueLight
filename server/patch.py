@@ -18,7 +18,10 @@ def load_patch(filename: str) -> OscPatch:
     path = PATCHES_DIR / filename
     if not path.exists():
         raise FileNotFoundError(f"Patch not found: {filename}")
-    data = json.loads(path.read_text())
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in patch file {filename}: {e}") from e
     return _parse_patch(data, filename)
 
 
@@ -43,6 +46,10 @@ def validate_patch(data: dict[str, Any]) -> list[str]:
             errors.append(f"Device {i}: missing 'port'")
         elif not isinstance(dev["port"], int) or dev["port"] < 1 or dev["port"] > 65535:
             errors.append(f"Device {i}: invalid port")
+        if "go_args" in dev and not isinstance(dev.get("go_args"), list):
+            errors.append(f"Device {i}: 'go_args' must be a list")
+        if "expect_reply" in dev and not isinstance(dev.get("expect_reply"), bool):
+            errors.append(f"Device {i}: 'expect_reply' must be a boolean")
         proto = dev.get("protocol", "udp")
         if proto not in ("udp", "tcp"):
             errors.append(f"Device {i}: protocol must be 'udp' or 'tcp'")
@@ -50,6 +57,9 @@ def validate_patch(data: dict[str, Any]) -> list[str]:
 
 
 def save_patch(filename: str, data: dict[str, Any]) -> None:
+    errors = validate_patch(data)
+    if errors:
+        raise ValueError(f"Invalid patch data: {'; '.join(errors)}")
     PATCHES_DIR.mkdir(parents=True, exist_ok=True)
     path = PATCHES_DIR / filename
     path.write_text(json.dumps(data, indent=2))

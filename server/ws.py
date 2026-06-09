@@ -116,7 +116,9 @@ async def _caller_message_loop(ws: WebSocket, manager: StateManager) -> None:
             from .patch import load_patch
             try:
                 patch = load_patch(msg["filename"])
-                await manager.load_patch(patch)
+                skipped = await manager.load_patch(patch)
+                if skipped:
+                    await ws.send_json({"type": "patch_loaded", "skipped": skipped})
             except Exception:
                 await ws.send_json({"type": "error", "message": "Failed to load patch"})
 

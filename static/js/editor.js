@@ -129,17 +129,48 @@
     cueBody.innerHTML = "";
     cues.forEach(function (cue, idx) {
       var tr = document.createElement("tr");
-      tr.innerHTML =
-        '<td><input type="number" value="' + cue.sequence + '"></td>' +
-        '<td><input type="text" value="' + esc(cue.scene) + '"></td>' +
-        '<td><input type="text" value="' + esc(cue.targets) + '" placeholder="LX:1, SND:1"></td>' +
-        '<td><input type="text" value="' + esc(cue.note) + '"></td>' +
-        '<td><button class="btn-del" data-idx="' + idx + '">✕</button></td>';
-      tr.querySelector(".btn-del").addEventListener("click", function () {
+
+      var tdSeq = document.createElement("td");
+      var inSeq = document.createElement("input");
+      inSeq.type = "number";
+      inSeq.value = cue.sequence;
+      tdSeq.appendChild(inSeq);
+
+      var tdScene = document.createElement("td");
+      var inScene = document.createElement("input");
+      inScene.type = "text";
+      inScene.value = cue.scene;
+      tdScene.appendChild(inScene);
+
+      var tdTargets = document.createElement("td");
+      var inTargets = document.createElement("input");
+      inTargets.type = "text";
+      inTargets.value = cue.targets;
+      inTargets.placeholder = "LX:1, SND:1";
+      tdTargets.appendChild(inTargets);
+
+      var tdNote = document.createElement("td");
+      var inNote = document.createElement("input");
+      inNote.type = "text";
+      inNote.value = cue.note;
+      tdNote.appendChild(inNote);
+
+      var tdDel = document.createElement("td");
+      var btnDel = document.createElement("button");
+      btnDel.className = "btn-del";
+      btnDel.textContent = "✕";
+      btnDel.addEventListener("click", function () {
         readCuesFromDOM();
         cues.splice(idx, 1);
         renderCues();
       });
+      tdDel.appendChild(btnDel);
+
+      tr.appendChild(tdSeq);
+      tr.appendChild(tdScene);
+      tr.appendChild(tdTargets);
+      tr.appendChild(tdNote);
+      tr.appendChild(tdDel);
       cueBody.appendChild(tr);
     });
   }
@@ -267,33 +298,107 @@
     });
   }
 
+  function makeSelect(options, selected, className) {
+    var sel = document.createElement("select");
+    if (className) sel.className = className;
+    options.forEach(function (val) {
+      var opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = val;
+      if (val === selected) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    return sel;
+  }
+
   function renderDevices() {
     deviceBody.innerHTML = "";
     devices.forEach(function (dev, idx) {
       var tr = document.createElement("tr");
 
-      var presetOpts = ["custom", "qlab5", "grandma3", "theatremix"].map(function (p) {
-        return '<option value="' + p + '"' + (dev.preset === p ? " selected" : "") + '>' + p + '</option>';
-      }).join("");
+      var tdName = document.createElement("td");
+      var inName = document.createElement("input");
+      inName.type = "text";
+      inName.value = dev.name;
+      inName.placeholder = "SOUND";
+      tdName.appendChild(inName);
 
-      var protoOpts = ["udp", "tcp"].map(function (p) {
-        return '<option value="' + p + '"' + (dev.protocol === p ? " selected" : "") + '>' + p + '</option>';
-      }).join("");
+      var tdPreset = document.createElement("td");
+      var selPreset = makeSelect(["custom", "qlab5", "grandma3", "theatremix"], dev.preset, "preset-sel");
+      tdPreset.appendChild(selPreset);
 
-      tr.innerHTML =
-        '<td><input type="text" value="' + esc(dev.name) + '" placeholder="SOUND"></td>' +
-        '<td><select class="preset-sel">' + presetOpts + '</select></td>' +
-        '<td><input type="text" value="' + esc(dev.ip) + '" placeholder="192.168.1.50"></td>' +
-        '<td><input type="number" value="' + dev.port + '" min="1" max="65535"></td>' +
-        '<td><select>' + protoOpts + '</select></td>' +
-        '<td><input type="text" value="' + esc(dev.go_template) + '" placeholder="/cue/{cue}/start"></td>' +
-        '<td><input type="text" value="' + esc(dev.go_args) + '" placeholder="arg1, arg2"></td>' +
-        '<td><input type="text" value="' + esc(dev.ping_template) + '" placeholder="/version"></td>' +
-        '<td style="text-align:center"><input type="checkbox"' + (dev.expect_reply ? " checked" : "") + '></td>' +
-        '<td><button class="btn-test" data-idx="' + idx + '">Test</button></td>' +
-        '<td><button class="btn-del" data-idx="' + idx + '">✕</button></td>';
+      var tdIp = document.createElement("td");
+      var inIp = document.createElement("input");
+      inIp.type = "text";
+      inIp.value = dev.ip;
+      inIp.placeholder = "192.168.1.50";
+      tdIp.appendChild(inIp);
 
-      tr.querySelector(".preset-sel").addEventListener("change", function (e) {
+      var tdPort = document.createElement("td");
+      var inPort = document.createElement("input");
+      inPort.type = "number";
+      inPort.value = dev.port;
+      inPort.min = "1";
+      inPort.max = "65535";
+      tdPort.appendChild(inPort);
+
+      var tdProto = document.createElement("td");
+      var selProto = makeSelect(["udp", "tcp"], dev.protocol);
+      tdProto.appendChild(selProto);
+
+      var tdGoTpl = document.createElement("td");
+      var inGoTpl = document.createElement("input");
+      inGoTpl.type = "text";
+      inGoTpl.value = dev.go_template;
+      inGoTpl.placeholder = "/cue/{cue}/start";
+      tdGoTpl.appendChild(inGoTpl);
+
+      var tdGoArgs = document.createElement("td");
+      var inGoArgs = document.createElement("input");
+      inGoArgs.type = "text";
+      inGoArgs.value = dev.go_args;
+      inGoArgs.placeholder = "arg1, arg2";
+      tdGoArgs.appendChild(inGoArgs);
+
+      var tdPing = document.createElement("td");
+      var inPing = document.createElement("input");
+      inPing.type = "text";
+      inPing.value = dev.ping_template;
+      inPing.placeholder = "/version";
+      tdPing.appendChild(inPing);
+
+      var tdReply = document.createElement("td");
+      tdReply.style.textAlign = "center";
+      var inReply = document.createElement("input");
+      inReply.type = "checkbox";
+      inReply.checked = dev.expect_reply;
+      tdReply.appendChild(inReply);
+
+      var tdTest = document.createElement("td");
+      var btnTest = document.createElement("button");
+      btnTest.className = "btn-test";
+      btnTest.textContent = "Test";
+      tdTest.appendChild(btnTest);
+
+      var tdDel = document.createElement("td");
+      var btnDel = document.createElement("button");
+      btnDel.className = "btn-del";
+      btnDel.textContent = "✕";
+      tdDel.appendChild(btnDel);
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdPreset);
+      tr.appendChild(tdIp);
+      tr.appendChild(tdPort);
+      tr.appendChild(tdProto);
+      tr.appendChild(tdGoTpl);
+      tr.appendChild(tdGoArgs);
+      tr.appendChild(tdPing);
+      tr.appendChild(tdReply);
+      tr.appendChild(tdTest);
+      tr.appendChild(tdDel);
+
+      selPreset.addEventListener("change", function (e) {
         var preset = PRESETS[e.target.value];
         if (!preset) return;
         readDevicesFromDOM();
@@ -308,12 +413,11 @@
         renderDevices();
       });
 
-      tr.querySelector(".btn-test").addEventListener("click", async function (e) {
-        var btn = e.target;
+      btnTest.addEventListener("click", async function () {
         readDevicesFromDOM();
         var d = devices[idx];
-        btn.textContent = "...";
-        btn.classList.remove("ok", "fail");
+        btnTest.textContent = "...";
+        btnTest.classList.remove("ok", "fail");
         try {
           var payload = {
             name: "test", ip: d.ip, port: parseInt(d.port) || 8000,
@@ -326,15 +430,15 @@
             body: JSON.stringify(payload),
           });
           var result = await res.json();
-          btn.textContent = result.trust || "?";
-          btn.classList.add(result.probe === "confirmed" ? "ok" : result.probe === "unverified" ? "" : "fail");
+          btnTest.textContent = result.trust || "?";
+          btnTest.classList.add(result.probe === "confirmed" ? "ok" : result.probe === "unverified" ? "" : "fail");
         } catch (err) {
-          btn.textContent = "err";
-          btn.classList.add("fail");
+          btnTest.textContent = "err";
+          btnTest.classList.add("fail");
         }
       });
 
-      tr.querySelector(".btn-del").addEventListener("click", function () {
+      btnDel.addEventListener("click", function () {
         readDevicesFromDOM();
         devices.splice(idx, 1);
         renderDevices();
@@ -349,10 +453,6 @@
     var el = document.getElementById(elId);
     el.textContent = msg;
     el.className = "status-msg" + (isError ? " error" : "");
-  }
-
-  function esc(s) {
-    return (s || "").replace(/"/g, "&quot;");
   }
 
   loadFileList();

@@ -118,7 +118,7 @@ class OscDevice:
     port: int
     protocol: str = "udp"
     go_template: str = ""
-    go_args: list = field(default_factory=list)
+    go_args: list[str] = field(default_factory=list)
     ping_template: str = ""
     expect_reply: bool = True
     preset: str = "custom"
