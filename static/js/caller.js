@@ -41,6 +41,7 @@
   const transportRow = document.getElementById("transportRow");
   const transportScene = document.getElementById("transportScene");
   const transportCue = document.getElementById("transportCue");
+  const transportNote = document.getElementById("transportNote");
   const warningBanner = document.getElementById("warningBanner");
   const lockBtn = document.getElementById("lockBtn");
   const joinInfoScreen = document.getElementById("joinInfoScreen");
@@ -185,6 +186,9 @@
       } else {
         transportCue.textContent = "";
       }
+      const note = ci.note || "";
+      transportNote.textContent = note;
+      transportNote.classList.toggle("visible", !!note);
       const pauseBtn = document.getElementById("pauseBtn");
       pauseBtn.classList.toggle("active", state.paused);
       pauseBtn.textContent = state.paused ? "RESUME" : "PAUSE";

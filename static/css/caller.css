@@ -233,6 +233,14 @@ body {
 
 .transport-row .cue-display .scene-label { color: var(--text-dim); }
 .transport-row .cue-display .cue-label { color: var(--yellow-bright); }
+.transport-row .cue-display .transport-note {
+  font-size: 12px;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--text-dim);
+  display: none;
+}
+.transport-row .cue-display .transport-note.visible { display: block; }
 
 .transport-row button {
   background: var(--border);

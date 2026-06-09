@@ -93,8 +93,9 @@ status information.
 ### Cue information strip
 
 When a showfile is loaded, the header shows this position's current **scene**
-and its **cue number** for the active cue (e.g. "Scene 1.2", cue "3"). It
-updates automatically as the show advances.
+and its **cue number** for the active cue (e.g. "Scene 1.2", cue "3"). If the
+current cue has a **note**, it appears in italic below the header strip. Notes
+update automatically as the show advances and hide when the cue has no note.
 
 ### Health dot
 
@@ -251,8 +252,9 @@ number.
 1. In **Settings → Showfile**, pick a file and tap **Load**. The transport row
    appears at the bottom of the Caller console and positions matching the first
    cue's targets are auto-armed.
-2. The transport row shows the current **scene** and the cue's targets
-   (e.g. "Scene 1.1 — LX 1, SND 1").
+2. The transport row shows the current **scene**, the cue's targets
+   (e.g. "Scene 1.1 — LX 1, SND 1"), and the cue's **note** (if any) in
+   italic below.
 3. Tap **GO ARMED** to fire GO on the armed positions and **auto-advance** to
    the next cue, which re-arms the next set of positions and pushes each operator
    their new cue number.
@@ -303,7 +305,8 @@ JSON files live in the `showfiles/` directory:
   - **`targets`** — list of `{ position, cue_number }`. `position` is matched to
     a connected position's label **case-insensitively**; `cue_number` is the
     label that operator sees.
-  - **`note`** — optional free-text description.
+  - **`note`** — optional free-text note, displayed on the Caller transport
+    and on each targeted Position's screen.
 
 An example file ships at `showfiles/example.json`.
 
