@@ -18,6 +18,24 @@ class HealthStatus(str, Enum):
     RED = "red"
 
 
+class PositionType(str, Enum):
+    HUMAN = "human"
+    OSC = "osc"
+
+
+class OscProbeState(str, Enum):
+    UNVERIFIED = "unverified"
+    PROBING = "probing"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+
+
+class OscFireResult(str, Enum):
+    NONE = "none"
+    SENT = "sent"
+    NO_REPLY = "no_reply"
+
+
 @dataclass
 class Position:
     client_id: str
@@ -29,6 +47,10 @@ class Position:
     health: HealthStatus = HealthStatus.GREEN
     latency_ms: float = 0.0
     cue_indicator: str = ""
+    type: PositionType = PositionType.HUMAN
+    osc_probe: OscProbeState = OscProbeState.UNVERIFIED
+    osc_fire_result: OscFireResult = OscFireResult.NONE
+    osc_trust: str = "none"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +63,10 @@ class Position:
             "health": self.health.value,
             "latency_ms": self.latency_ms,
             "cue_indicator": self.cue_indicator,
+            "type": self.type.value,
+            "osc_probe": self.osc_probe.value,
+            "osc_fire_result": self.osc_fire_result.value,
+            "osc_trust": self.osc_trust,
         }
 
 
@@ -86,6 +112,46 @@ class Showfile:
 
 
 @dataclass
+class OscDevice:
+    name: str
+    ip: str
+    port: int
+    protocol: str = "udp"
+    go_template: str = ""
+    go_args: list[str] = field(default_factory=list)
+    ping_template: str = ""
+    expect_reply: bool = True
+    preset: str = "custom"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "ip": self.ip,
+            "port": self.port,
+            "protocol": self.protocol,
+            "go_template": self.go_template,
+            "go_args": list(self.go_args),
+            "ping_template": self.ping_template,
+            "expect_reply": self.expect_reply,
+            "preset": self.preset,
+        }
+
+
+@dataclass
+class OscPatch:
+    name: str
+    devices: list[OscDevice]
+    filename: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "devices": [d.to_dict() for d in self.devices],
+            "filename": self.filename,
+        }
+
+
+@dataclass
 class AppState:
     positions: dict[str, Position] = field(default_factory=dict)
     caller_connected: bool = False
@@ -96,6 +162,7 @@ class AppState:
     showfile: Showfile | None = None
     current_cue_index: int = 0
     paused: bool = False
+    osc_patch_filename: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -108,4 +175,5 @@ class AppState:
             "showfile": self.showfile.to_dict() if self.showfile else None,
             "current_cue_index": self.current_cue_index,
             "paused": self.paused,
+            "osc_patch_filename": self.osc_patch_filename,
         }

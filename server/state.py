@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from .models import AppState, ButtonState, HealthStatus, Position
+from . import osc as osc_mod
+from .models import (
+    AppState, ButtonState, HealthStatus, OscDevice, OscFireResult,
+    OscPatch, OscProbeState, Position, PositionType,
+)
 from .persistence import save_state
 
 
@@ -18,6 +22,8 @@ class StateManager:
         self.caller_ws: WebSocket | None = None
         self.position_ws: dict[str, WebSocket] = {}
         self._lock = asyncio.Lock()
+        self.osc_devices: dict[str, OscDevice] = {}
+        self._osc_heartbeat_task: asyncio.Task | None = None
 
     def _persist(self) -> None:
         save_state(self.state)
@@ -95,13 +101,24 @@ class StateManager:
             pos = self.state.positions.get(client_id)
             if not pos or self.state.locked:
                 return
-            pos.standby = ButtonState.CALLED
-            pos.armed = False
-            self._persist()
-            await self._send_position(client_id, {
-                "type": "standby_called",
-            })
-            await self._notify_caller_full_state()
+            self._clear_transient_osc_results()
+            if pos.type == PositionType.OSC:
+                device = self.osc_devices.get(client_id)
+                if device:
+                    pos.osc_probe = OscProbeState.PROBING
+                    probe_state, trust = await osc_mod.probe(device)
+                    pos.osc_probe = probe_state
+                    pos.osc_trust = trust
+                self._persist()
+                await self._notify_caller_full_state()
+            else:
+                pos.standby = ButtonState.CALLED
+                pos.armed = False
+                self._persist()
+                await self._send_position(client_id, {
+                    "type": "standby_called",
+                })
+                await self._notify_caller_full_state()
 
     async def ack_standby(self, client_id: str) -> None:
         async with self._lock:
@@ -117,14 +134,27 @@ class StateManager:
             pos = self.state.positions.get(client_id)
             if not pos or self.state.locked:
                 return
-            pos.standby = ButtonState.IDLE
-            pos.go = ButtonState.CALLED
-            pos.armed = False
-            self._persist()
-            await self._send_position(client_id, {
-                "type": "go_called",
-            })
-            await self._notify_caller_full_state()
+            self._clear_transient_osc_results()
+            if pos.type == PositionType.OSC:
+                pos.standby = ButtonState.IDLE
+                pos.armed = False
+                device = self.osc_devices.get(client_id)
+                if device:
+                    cue_number = self._get_cue_number_for_position(pos.label)
+                    result = await osc_mod.fire(device, cue_number)
+                    pos.osc_fire_result = result
+                    await self._send_osc_result(client_id, result.value)
+                self._persist()
+                await self._notify_caller_full_state()
+            else:
+                pos.standby = ButtonState.IDLE
+                pos.go = ButtonState.CALLED
+                pos.armed = False
+                self._persist()
+                await self._send_position(client_id, {
+                    "type": "go_called",
+                })
+                await self._notify_caller_full_state()
 
     async def ack_go(self, client_id: str) -> None:
         async with self._lock:
@@ -141,10 +171,19 @@ class StateManager:
         async with self._lock:
             if self.state.locked:
                 return
+            self._clear_transient_osc_results()
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
-                    pos.standby = ButtonState.CALLED
-                    await self._send_position(pos.client_id, {"type": "standby_called"})
+                    if pos.type == PositionType.OSC:
+                        device = self.osc_devices.get(pos.client_id)
+                        if device:
+                            pos.osc_probe = OscProbeState.PROBING
+                            probe_state, trust = await osc_mod.probe(device)
+                            pos.osc_probe = probe_state
+                            pos.osc_trust = trust
+                    else:
+                        pos.standby = ButtonState.CALLED
+                        await self._send_position(pos.client_id, {"type": "standby_called"})
             self._persist()
             await self._notify_caller_full_state()
 
@@ -152,12 +191,23 @@ class StateManager:
         async with self._lock:
             if self.state.locked:
                 return
+            self._clear_transient_osc_results()
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
-                    pos.standby = ButtonState.IDLE
-                    pos.go = ButtonState.CALLED
-                    pos.armed = False
-                    await self._send_position(pos.client_id, {"type": "go_called"})
+                    if pos.type == PositionType.OSC:
+                        pos.standby = ButtonState.IDLE
+                        pos.armed = False
+                        device = self.osc_devices.get(pos.client_id)
+                        if device:
+                            cue_number = self._get_cue_number_for_position(pos.label)
+                            result = await osc_mod.fire(device, cue_number)
+                            pos.osc_fire_result = result
+                            await self._send_osc_result(pos.client_id, result.value)
+                    else:
+                        pos.standby = ButtonState.IDLE
+                        pos.go = ButtonState.CALLED
+                        pos.armed = False
+                        await self._send_position(pos.client_id, {"type": "go_called"})
             self._advance_cue()
             self._persist()
             await self._broadcast_positions_cue_info()
@@ -299,6 +349,134 @@ class StateManager:
             self._persist()
             await self._notify_caller_full_state()
 
+    # --- OSC patch ---
+
+    async def load_patch(self, patch: OscPatch) -> list[str]:
+        async with self._lock:
+            self._clear_transient_osc_results()
+            skipped: list[str] = []
+            existing_labels = {
+                p.label.lower() for p in self.state.positions.values()
+                if p.type == PositionType.HUMAN
+            }
+            for device in patch.devices:
+                if device.name.lower() in existing_labels:
+                    skipped.append(device.name)
+                    continue
+                osc_id = f"osc:{device.name.lower()}"
+                self.state.positions[osc_id] = Position(
+                    client_id=osc_id,
+                    label=device.name,
+                    connected=True,
+                    type=PositionType.OSC,
+                    osc_probe=OscProbeState.UNVERIFIED,
+                )
+                self.osc_devices[osc_id] = device
+            self.state.osc_patch_filename = patch.filename
+            self._update_cue_indicators()
+            self._persist()
+            await self._notify_caller_full_state()
+        self._start_osc_heartbeat()
+        return skipped
+
+    async def unload_patch(self) -> None:
+        async with self._lock:
+            self._clear_transient_osc_results()
+            self._stop_osc_heartbeat()
+            osc_ids = [cid for cid, p in self.state.positions.items() if p.type == PositionType.OSC]
+            for cid in osc_ids:
+                del self.state.positions[cid]
+            self.osc_devices.clear()
+            self.state.osc_patch_filename = ""
+            self._update_cue_indicators()
+            self._persist()
+            await self._notify_caller_full_state()
+
+    async def probe_test(self, data: dict[str, Any]) -> dict[str, str]:
+        device = OscDevice(
+            name=data.get("name", "test"),
+            ip=data.get("ip", ""),
+            port=data.get("port", 8000),
+            protocol=data.get("protocol", "udp"),
+            ping_template=data.get("ping_template", ""),
+            expect_reply=data.get("expect_reply", False),
+        )
+        async with self._lock:
+            probe_state, trust = await osc_mod.probe(device)
+        return {"probe": probe_state.value, "trust": trust}
+
+    async def clear_osc_patch_filename(self) -> None:
+        async with self._lock:
+            self.state.osc_patch_filename = ""
+            self._persist()
+
+    # --- OSC helpers (call under lock) ---
+
+    def _clear_transient_osc_results(self) -> None:
+        for pos in self.state.positions.values():
+            if pos.osc_fire_result != OscFireResult.NONE:
+                pos.osc_fire_result = OscFireResult.NONE
+
+    def _get_cue_number_for_position(self, label: str) -> str:
+        sf = self.state.showfile
+        if not sf or self.state.current_cue_index >= len(sf.cues):
+            return ""
+        cue = sf.cues[self.state.current_cue_index]
+        for target in cue.targets:
+            if target.position.lower() == label.lower():
+                return target.cue_number
+        return ""
+
+    async def _send_osc_result(self, client_id: str, result: str) -> None:
+        if not self.caller_ws:
+            return
+        try:
+            await self.caller_ws.send_json({
+                "type": "osc_result",
+                "client_id": client_id,
+                "result": result,
+            })
+        except Exception:
+            pass
+
+    def _start_osc_heartbeat(self) -> None:
+        self._stop_osc_heartbeat()
+        if self.osc_devices:
+            self._osc_heartbeat_task = asyncio.create_task(self._osc_heartbeat_loop())
+
+    def _stop_osc_heartbeat(self) -> None:
+        if self._osc_heartbeat_task:
+            self._osc_heartbeat_task.cancel()
+            self._osc_heartbeat_task = None
+
+    async def _osc_heartbeat_loop(self) -> None:
+        try:
+            while True:
+                # 5s interval: less aggressive than the 1s position heartbeat to reduce network load on OSC gear
+                await asyncio.sleep(5.0)
+                async with self._lock:
+                    changed = False
+                    for cid, device in list(self.osc_devices.items()):
+                        pos = self.state.positions.get(cid)
+                        if not pos:
+                            continue
+                        if pos.osc_trust not in ("osc_reply", "tcp_port"):
+                            continue
+                        try:
+                            probe_state, trust = await osc_mod.probe(device)
+                            if pos.osc_probe != probe_state or pos.osc_trust != trust:
+                                pos.osc_probe = probe_state
+                                pos.osc_trust = trust
+                                changed = True
+                        except Exception:
+                            if pos.osc_probe != OscProbeState.FAILED:
+                                pos.osc_probe = OscProbeState.FAILED
+                                changed = True
+                    if changed:
+                        await self._notify_caller_full_state()
+        except asyncio.CancelledError:
+            pass
+
     # --- Cue helpers (call under lock) ---
 
     def _advance_cue(self) -> None:
@@ -372,6 +550,7 @@ class StateManager:
 
     async def exit_show(self) -> None:
         async with self._lock:
+            self._stop_osc_heartbeat()
             await self._broadcast_positions({"type": "show_ended"})
             for ws in list(self.position_ws.values()):
                 try:
@@ -379,6 +558,7 @@ class StateManager:
                 except Exception:
                     pass
             self.position_ws.clear()
+            self.osc_devices.clear()
             self.state = AppState()
             from .persistence import wipe_state
             wipe_state()
@@ -386,6 +566,9 @@ class StateManager:
     # --- Messaging helpers ---
 
     async def _send_position(self, client_id: str, msg: dict) -> None:
+        pos = self.state.positions.get(client_id)
+        if pos and pos.type == PositionType.OSC:
+            return
         ws = self.position_ws.get(client_id)
         if ws:
             try:
@@ -436,6 +619,7 @@ class StateManager:
             "missing_positions": missing,
             "password_enabled": self.state.password_enabled,
             "password": self.state.password,
+            "osc_patch_filename": self.state.osc_patch_filename,
         }
         try:
             await self.caller_ws.send_json(msg)
@@ -468,4 +652,5 @@ class StateManager:
             "missing_positions": missing,
             "password_enabled": self.state.password_enabled,
             "password": self.state.password,
+            "osc_patch_filename": self.state.osc_patch_filename,
         }

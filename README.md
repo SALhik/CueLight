@@ -26,7 +26,8 @@ Then open `http://<your-ip>:8000` on the Caller device. The first connection bec
 
 - **Caller** sees a grid of connected Positions with STANDBY / PRESET / GO buttons, plus master controls that operate on all armed positions.
 - **Positions** see large STANDBY and GO buttons. When the Caller calls STANDBY, the button flashes red. The operator taps to acknowledge. When the Caller calls GO, the button lights green; the operator taps to confirm receipt.
-- A **showfile** can be loaded to auto-advance through cues and auto-arm target positions.
+- **OSC devices** (QLab, grandMA3, TheatreMix, or any custom OSC software) can be added as virtual positions via an OSC patch. They appear in the same grid — STANDBY probes the device, GO fires an OSC message.
+- A **showfile** can be loaded to auto-advance through cues and auto-arm target positions (including OSC positions).
 
 ## Showfile format
 
@@ -57,6 +58,36 @@ JSON files in `showfiles/`. Example:
 
 An example showfile is included at `showfiles/example.json`.
 
-## Showfile editor
+## OSC patch format
 
-Access Settings > Edit showfile, or navigate to `/editor` directly.
+JSON files in `patches/` define the OSC devices at a venue. Patches are decoupled from showfiles — cues travel with the production, IPs are venue-specific.
+
+```json
+{
+  "name": "Main Stage",
+  "devices": [
+    {
+      "name": "SOUND",
+      "preset": "qlab5",
+      "ip": "192.168.1.50",
+      "port": 53000,
+      "protocol": "tcp",
+      "go_template": "/cue/{cue}/start",
+      "ping_template": "/version",
+      "expect_reply": true
+    }
+  ]
+}
+```
+
+- `name`: position label and showfile cue target (must be unique across all positions)
+- `preset`: `qlab5`, `grandma3`, `theatremix`, or `custom` (prefills editor fields)
+- `go_template`: OSC address for GO; `{cue}` is replaced with the showfile cue number
+- `ping_template`: OSC address for the readiness probe (empty = TCP-port check or unverified)
+- `expect_reply`: whether to wait for a reply to confirm fire/probe
+
+An example patch is included at `patches/mainstage.json`.
+
+## Editor
+
+Access Settings > Edit showfile or Edit patches, or navigate to `/editor` directly. The editor has tabs for showfiles and OSC patches.

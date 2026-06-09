@@ -31,10 +31,12 @@
     missing_positions: [],
     password_enabled: false,
     password: "",
+    osc_patch_filename: "",
   };
   let reconnectDelay = 500;
   let lockHoldTimer = null;
   let renamingClientId = null;
+  let oscResultTimers = {};
 
   // --- DOM ---
   const grid = document.getElementById("positionsGrid");
@@ -93,13 +95,32 @@
         state.missing_positions = msg.missing_positions || [];
         state.password_enabled = msg.password_enabled;
         state.password = msg.password || "";
+        state.osc_patch_filename = msg.osc_patch_filename || "";
         render();
+        break;
+
+      case "osc_result":
+        handleOscResult(msg.client_id, msg.result);
         break;
 
       case "ping":
         send({ type: "pong", ts: msg.ts });
         break;
     }
+  }
+
+  function handleOscResult(clientId, result) {
+    if (oscResultTimers[clientId]) {
+      clearTimeout(oscResultTimers[clientId].timer);
+    }
+    oscResultTimers[clientId] = {
+      result: result,
+      timer: setTimeout(function () {
+        delete oscResultTimers[clientId];
+        render();
+      }, 2000),
+    };
+    render();
   }
 
   // --- Render ---
@@ -111,61 +132,86 @@
   }
 
   function renderGrid() {
-    // Preserve order: sort by label for consistency
-    const posIds = Object.keys(state.positions);
+    var posIds = Object.keys(state.positions);
 
-    // Build map of existing columns to reuse
-    const existingCols = {};
-    grid.querySelectorAll(".position-col").forEach((col) => {
-      existingCols[col.dataset.clientId] = col;
-    });
-
-    // Clear and rebuild
     grid.innerHTML = "";
 
-    posIds.forEach((cid) => {
-      const pos = state.positions[cid];
-      const col = document.createElement("div");
-      col.className = "position-col" + (pos.connected ? "" : " disconnected");
+    posIds.forEach(function (cid) {
+      var pos = state.positions[cid];
+      var isOsc = pos.type === "osc";
+      var col = document.createElement("div");
+      col.className = "position-col";
+      if (!pos.connected) col.classList.add("disconnected");
+      if (isOsc) col.classList.add("osc-col");
       col.dataset.clientId = cid;
 
       // Header
-      const header = document.createElement("div");
+      var header = document.createElement("div");
       header.className = "col-header";
-      header.innerHTML = `
-        <div class="pos-label">${escHtml(pos.label)}</div>
-        <div class="cue-indicator">${escHtml(pos.cue_indicator)}</div>
-        <div class="disconnect-badge">DISCONNECTED</div>
-      `;
-      header.addEventListener("click", () => openRename(cid, pos.label));
+      var badgeHtml = isOsc ? '<div class="osc-badge">OSC</div>' : "";
+      var healthDotHtml = "";
+      if (isOsc) {
+        var dotCls = "health-dot";
+        if (pos.osc_trust === "none") dotCls += " osc-unverified";
+        else if (pos.osc_probe === "confirmed") dotCls += "";
+        else if (pos.osc_probe === "failed") dotCls += " red";
+        else dotCls += " osc-unverified";
+        healthDotHtml = '<span class="' + dotCls + '"></span> ';
+      }
+      header.innerHTML =
+        badgeHtml +
+        '<div class="pos-label">' + healthDotHtml + escHtml(pos.label) + "</div>" +
+        '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>" +
+        '<div class="disconnect-badge">DISCONNECTED</div>';
+      header.addEventListener("click", function () {
+        openRename(cid, pos.label);
+      });
       col.appendChild(header);
 
       // Standby
-      const sbBtn = document.createElement("button");
+      var sbBtn = document.createElement("button");
       sbBtn.className = "col-btn btn-standby-caller";
-      if (pos.standby === "called") sbBtn.classList.add("called", "flashing");
-      else if (pos.standby === "acked") sbBtn.classList.add("acked");
+      if (isOsc) {
+        if (pos.osc_probe === "probing") sbBtn.classList.add("osc-probing");
+        else if (pos.osc_probe === "confirmed") sbBtn.classList.add("osc-confirmed");
+        else if (pos.osc_probe === "failed") sbBtn.classList.add("osc-failed");
+        else sbBtn.classList.add("osc-unverified");
+      } else {
+        if (pos.standby === "called") sbBtn.classList.add("called", "flashing");
+        else if (pos.standby === "acked") sbBtn.classList.add("acked");
+      }
       sbBtn.textContent = "STANDBY";
-      sbBtn.addEventListener("click", () => {
+      sbBtn.addEventListener("click", function () {
         send({ type: "standby", client_id: cid });
       });
       col.appendChild(sbBtn);
 
       // Preset (arm)
-      const preBtn = document.createElement("button");
+      var preBtn = document.createElement("button");
       preBtn.className = "col-btn btn-preset-caller" + (pos.armed ? " armed" : "");
       preBtn.textContent = "PRESET";
-      preBtn.addEventListener("click", () => {
+      preBtn.addEventListener("click", function () {
         send({ type: "toggle_arm", client_id: cid });
       });
       col.appendChild(preBtn);
 
       // Go
-      const goBtn = document.createElement("button");
+      var goBtn = document.createElement("button");
       goBtn.className = "col-btn btn-go-caller";
-      if (pos.go === "called") goBtn.classList.add("called");
-      goBtn.textContent = "GO";
-      goBtn.addEventListener("click", () => {
+      var oscResult = oscResultTimers[cid];
+      if (oscResult) {
+        if (oscResult.result === "sent") {
+          goBtn.classList.add("osc-sent");
+          goBtn.textContent = "SENT";
+        } else if (oscResult.result === "no_reply") {
+          goBtn.classList.add("osc-no-reply");
+          goBtn.textContent = "NO REPLY";
+        }
+      } else {
+        if (pos.go === "called") goBtn.classList.add("called");
+        goBtn.textContent = "GO";
+      }
+      goBtn.addEventListener("click", function () {
         send({ type: "go", client_id: cid });
       });
       col.appendChild(goBtn);
@@ -354,9 +400,25 @@
     list.innerHTML = "";
     Object.values(state.positions).forEach((pos) => {
       const li = document.createElement("li");
-      const dot = `<span class="health-dot${pos.health === "yellow" ? " yellow" : pos.health === "red" ? " red" : ""}"></span>`;
-      const warning = !pos.connected ? ' ⚠️' : '';
-      li.innerHTML = `${dot} <span>${escHtml(pos.label)}${warning}</span> <span style="color:var(--text-dim);margin-left:auto">${Math.round(pos.latency_ms)}ms</span>`;
+      var dotClass = "health-dot";
+      if (pos.type === "osc") {
+        if (pos.osc_trust === "none") dotClass += " osc-unverified";
+        else if (pos.osc_probe === "confirmed") dotClass += "";
+        else if (pos.osc_probe === "failed") dotClass += " red";
+        else dotClass += " osc-unverified";
+      } else {
+        if (pos.health === "yellow") dotClass += " yellow";
+        else if (pos.health === "red") dotClass += " red";
+      }
+      const dot = `<span class="${dotClass}"></span>`;
+      const tag = pos.type === "osc" ? " [OSC]" : "";
+      const warning = !pos.connected && pos.type !== "osc" ? ' ⚠️' : '';
+      const metric = pos.type === "osc"
+        ? pos.osc_trust === "osc_reply" ? "app confirmed"
+          : pos.osc_trust === "tcp_port" ? "port listening"
+          : "unverified"
+        : Math.round(pos.latency_ms) + "ms";
+      li.innerHTML = `${dot} <span>${escHtml(pos.label)}${tag}${warning}</span> <span style="color:var(--text-dim);margin-left:auto">${metric}</span>`;
       list.appendChild(li);
     });
 
@@ -376,6 +438,23 @@
 
     document.getElementById("currentShowfile").textContent =
       state.showfile ? `Loaded: ${state.showfile.filename}` : "No showfile loaded";
+
+    // Patches
+    try {
+      const res = await fetch("/api/patches");
+      const data = await res.json();
+      const sel = document.getElementById("patchSelect");
+      sel.innerHTML = "";
+      data.files.forEach((f) => {
+        const opt = document.createElement("option");
+        opt.value = f;
+        opt.textContent = f;
+        sel.appendChild(opt);
+      });
+    } catch (e) {}
+
+    document.getElementById("currentPatch").textContent =
+      state.osc_patch_filename ? `Loaded: ${state.osc_patch_filename}` : "No patch loaded";
 
     // Network
     document.getElementById("networkInfo").textContent = window.location.host;
@@ -401,6 +480,23 @@
 
   document.getElementById("editShowfileBtn").addEventListener("click", () => {
     window.open("/editor", "_blank");
+  });
+
+  document.getElementById("loadPatchBtn").addEventListener("click", () => {
+    const filename = document.getElementById("patchSelect").value;
+    if (filename) {
+      send({ type: "load_patch", filename: filename });
+      closeModal("settingsModal");
+    }
+  });
+
+  document.getElementById("unloadPatchBtn").addEventListener("click", () => {
+    send({ type: "unload_patch" });
+    closeModal("settingsModal");
+  });
+
+  document.getElementById("editPatchBtn").addEventListener("click", () => {
+    window.open("/editor#patches", "_blank");
   });
 
   document.getElementById("pwToggle").addEventListener("change", (e) => {

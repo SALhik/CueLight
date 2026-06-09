@@ -12,8 +12,41 @@ body {
 
 .editor-header h1 { font-size: 20px; }
 
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-left: 24px;
+}
+
+.tab-btn {
+  background: var(--surface);
+  color: var(--text-dim);
+  padding: 8px 16px;
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn.active {
+  background: var(--border);
+  color: var(--text);
+  border-bottom: 2px solid var(--green-bright);
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.file-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .editor-header select,
-.editor-header input {
+.editor-header input,
+.file-bar select,
+.file-bar input {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -22,7 +55,8 @@ body {
   font-size: 14px;
 }
 
-.editor-header button {
+.editor-header button,
+.file-bar button {
   background: var(--border);
   color: var(--text);
   padding: 8px 16px;
@@ -119,3 +153,27 @@ tr:hover td { background: var(--surface); }
 }
 
 .status-msg.error { color: var(--red-bright); }
+
+.btn-test {
+  background: var(--osc-accent-dim) !important;
+  color: var(--osc-accent) !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+.btn-test.ok { color: var(--green-bright) !important; }
+.btn-test.fail { color: var(--red-bright) !important; }
+
+td select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 4px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+td input[type="checkbox"] {
+  width: auto;
+}

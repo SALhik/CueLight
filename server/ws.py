@@ -112,6 +112,19 @@ async def _caller_message_loop(ws: WebSocket, manager: StateManager) -> None:
         elif msg_type == "remove_position":
             await manager.remove_position(msg["client_id"])
 
+        elif msg_type == "load_patch":
+            from .patch import load_patch
+            try:
+                patch = load_patch(msg["filename"])
+                skipped = await manager.load_patch(patch)
+                if skipped:
+                    await ws.send_json({"type": "patch_loaded", "skipped": skipped})
+            except Exception:
+                await ws.send_json({"type": "error", "message": "Failed to load patch"})
+
+        elif msg_type == "unload_patch":
+            await manager.unload_patch()
+
 
 async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
     await ws.accept()

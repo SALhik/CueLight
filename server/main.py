@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import socket
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import qrcode
@@ -9,6 +10,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
 from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
 from .state import StateManager
@@ -17,8 +19,21 @@ from .ws import caller_ws_handler, position_ws_handler
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="CueLight")
 manager = StateManager(load_state())
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    if manager.state.osc_patch_filename:
+        try:
+            patch = load_patch(manager.state.osc_patch_filename)
+            await manager.load_patch(patch)
+        except Exception:
+            await manager.clear_osc_patch_filename()
+    yield
+
+
+app = FastAPI(title="CueLight", lifespan=_lifespan)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -128,6 +143,35 @@ async def api_save_showfile(filename: str, request: Request):
     if errors:
         return JSONResponse({"errors": errors}, status_code=400)
     save_showfile(filename, data)
+    return {"ok": True}
+
+
+@app.get("/api/patches")
+async def api_patches():
+    return {"files": list_patches()}
+
+
+@app.get("/api/patch/{filename}")
+async def api_get_patch(filename: str):
+    try:
+        return load_patch(filename).to_dict()
+    except FileNotFoundError:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    except ValueError:
+        return JSONResponse({"error": "invalid patch file"}, status_code=400)
+
+
+@app.post("/api/patch/{filename}")
+async def api_save_patch(filename: str, request: Request):
+    if filename == "_probe_test":
+        data = await request.json()
+        result = await manager.probe_test(data)
+        return result
+    data = await request.json()
+    errors = validate_patch(data)
+    if errors:
+        return JSONResponse({"errors": errors}, status_code=400)
+    save_patch(filename, data)
     return {"ok": True}
 
 

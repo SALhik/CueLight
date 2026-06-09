@@ -79,29 +79,57 @@ When a showfile is loaded:
 3. `_broadcast_positions_cue_info()` sends each position its own cue number for the new cue
 4. If paused, `_advance_cue()` is a no-op (manual buttons still work)
 
+### OSC outbound
+
+An OSC target is modeled as a virtual position (`PositionType.OSC`) that appears in the caller grid alongside human positions. Differences from human positions: no WebSocket, created from an OSC patch file (not by joining), STANDBY runs a probe instead of calling, GO fires an OSC message instead of waiting for a human ack.
+
+**Data flow for OSC GO:**
+1. Caller taps GO (or Master GO fires armed OSC positions)
+2. `StateManager` detects `type == OSC`, calls `osc.fire(device, cue_number)`
+3. `osc.py` builds the OSC message from `go_template` (with `{cue}` substitution) and sends via UDP/TCP
+4. Returns `SENT` (reply received or open-loop) or `NO_REPLY` (timeout)
+5. Server sends `osc_result` message to caller + `full_state` update
+6. Frontend shows SENT/NO_REPLY for 2s, then clears
+
+**Data flow for OSC STANDBY (probe):**
+1. Caller taps STANDBY on an OSC column (or Master STANDBY includes armed OSC positions)
+2. `osc.probe(device)` runs tiered: OSC ping reply > TCP port connect > unverified
+3. Result stored in `pos.osc_probe` / `pos.osc_trust`, caller notified via `full_state`
+
+**Key files:**
+- `server/models.py` — `PositionType`, `OscProbeState`, `OscFireResult`, `OscDevice`, `OscPatch`
+- `server/patch.py` — load/save/validate patch files from `patches/` directory
+- `server/osc.py` — `fire()` and `probe()` with tight 400ms timeouts, fully async
+- `server/state.py` — `load_patch()`, `unload_patch()`, OSC branches in `call_go`/`call_standby`/`go_armed`/`standby_armed`, ~5s heartbeat for confirmable devices
+
+**OSC positions are runtime-only:** they are NOT written to `state/snapshot.json`. On startup, the patch is reloaded from `patches/` by the stored `osc_patch_filename`. `_send_position()` is a no-op for OSC positions. All OSC I/O runs under the `StateManager._lock` with tight timeouts — never blocks the show.
+
 ### Persistence
 
-`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. On startup, `load_state()` restores positions (marked disconnected), lock, password, and cue index. The showfile is **not** stored in the snapshot — it's reloaded from `showfiles/` by filename. The EXIT button calls `wipe_state()` which deletes the snapshot.
+`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, and `osc_patch_filename`. The showfile and OSC patch are **not** stored in the snapshot — they are reloaded from `showfiles/` and `patches/` by filename. OSC positions are filtered out of the snapshot on write. The EXIT button calls `wipe_state()` which deletes the snapshot.
 
 ### Label uniqueness
 
-Labels are unique (case-insensitive). Enforced at three points:
+Labels are unique (case-insensitive). Enforced at four points:
 - `POST /api/check_label` — checked by join page before navigating
-- `register_position()` in state.py — returns `"duplicate"` if a new client_id uses a taken label
+- `register_position()` in state.py — returns `"duplicate"` if a new client_id uses a taken label (includes OSC labels)
 - `rename_position()` in state.py — returns `False` if the new name conflicts
+- `load_patch()` in state.py — skips devices whose name collides with an existing human label
 - Caller-side rename modal also validates client-side before sending
 
 ### WebSocket protocol
 
 Two endpoints: `/ws/caller` and `/ws/position`. On connect, the client sends a JSON handshake with `client_id` (and `label` for positions). The server responds with role assignment and initial state.
 
-**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `remove_position`
+**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `remove_position`, `load_patch`, `unload_patch`
 
 **Position messages (client → server):** `ack_standby`, `ack_go`, `rename`, `disconnect`, `pong`
 
 **Server → position messages:** `joined`, `standby_called`, `go_called`, `state_reset`, `lock_changed`, `label_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`
 
-**Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `ping`, `error`
+**Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `osc_result`, `ping`, `error`
+
+**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save)
 
 ### Health monitoring
 
