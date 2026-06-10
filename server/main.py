@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
-from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
+from .showfile import list_showfiles, save_showfile, validate_showfile
 from .state import StateManager
 from .ws import caller_ws_handler, position_ws_handler
 

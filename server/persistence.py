@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from threading import Timer
 
-from .models import AppState, ButtonState, HealthStatus, Position, PositionType
+from .models import AppState, ButtonState, HealthStatus, Position
 
 STATE_DIR = Path(__file__).resolve().parent.parent / "state"
 SNAPSHOT_PATH = STATE_DIR / "snapshot.json"

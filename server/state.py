@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from fastapi import WebSocket
@@ -299,7 +298,6 @@ class StateManager:
 
     async def load_showfile(self, showfile: Any) -> None:
         async with self._lock:
-            from .models import Showfile
             self.state.showfile = showfile
             self.state.current_cue_index = 0
             self.state.paused = False

@@ -166,9 +166,6 @@ async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
         init_msg["note"] = cue.note if cue else ""
     await ws.send_json(init_msg)
 
-    missed_pongs = 0
-    last_pong_ts = time.time()
-
     heartbeat_task = asyncio.create_task(
         _position_heartbeat(ws, client_id, manager)
     )
