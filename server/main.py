@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,7 +29,7 @@ async def _lifespan(app: FastAPI):
         try:
             patch = load_patch(manager.state.osc_patch_filename)
             await manager.load_patch(patch)
-        except Exception:
+        except (FileNotFoundError, ValueError):
             await manager.clear_osc_patch_filename()
     yield
 
@@ -163,11 +164,14 @@ async def api_get_patch(filename: str):
 
 @app.post("/api/patch/{filename}")
 async def api_save_patch(filename: str, request: Request):
-    if filename == "_probe_test":
+    try:
         data = await request.json()
-        result = await manager.probe_test(data)
-        return result
-    data = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    if filename == "_probe_test":
+        return await manager.probe_test(data)
+
     errors = validate_patch(data)
     if errors:
         return JSONResponse({"errors": errors}, status_code=400)

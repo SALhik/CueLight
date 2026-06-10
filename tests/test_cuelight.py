@@ -860,22 +860,28 @@ class TestOscPatchAPI(CueLightTestCase):
         resp = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/patch/mainstage.json").read())
         self.assertEqual(resp["name"], "Main Stage")
         self.assertGreater(len(resp["devices"]), 0)
+        first = resp["devices"][0]
+        self.assertIn("protocol", first)
+        self.assertIn("expect_reply", first)
+        self.assertIn("preset", first)
 
     def test_save_and_validate_patch(self) -> None:
-        data = json.dumps({
-            "name": "Test Patch",
-            "devices": [{"name": "TEST", "ip": "127.0.0.1", "port": 9000}]
-        }).encode()
-        req = urllib_request.Request(
-            f"{HTTP_URL}/api/patch/_test_tmp.json",
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-        resp = json.loads(urllib_request.urlopen(req).read())
-        self.assertTrue(resp["ok"])
         tmp = PROJECT_ROOT / "patches" / "_test_tmp.json"
-        if tmp.exists():
-            tmp.unlink()
+        try:
+            data = json.dumps({
+                "name": "Test Patch",
+                "devices": [{"name": "TEST", "ip": "127.0.0.1", "port": 9000}]
+            }).encode()
+            req = urllib_request.Request(
+                f"{HTTP_URL}/api/patch/_test_tmp.json",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            resp = json.loads(urllib_request.urlopen(req).read())
+            self.assertTrue(resp["ok"])
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
     def test_invalid_patch_rejected(self) -> None:
         data = json.dumps({"no_name": True}).encode()
@@ -1077,11 +1083,13 @@ class TestOscFire(CueLightTestCase):
     def test_go_with_cue_template_substitution(self) -> None:
         """GO template {cue} is substituted with the showfile cue number."""
         async def run() -> None:
+            received = asyncio.Event()
             received_data: list[bytes] = []
 
             class Listener(asyncio.DatagramProtocol):
                 def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     received_data.append(data)
+                    received.set()
 
             loop = asyncio.get_event_loop()
             transport, _ = await loop.create_datagram_endpoint(
@@ -1108,7 +1116,7 @@ class TestOscFire(CueLightTestCase):
                 # GO on the armed OSC position — cue 1 targets LX with cue_number "1"
                 await cws.send(json.dumps({"type": "go", "client_id": "osc:lx"}))
                 await recv_type(cws, "osc_result")
-                await asyncio.sleep(0.2)
+                await asyncio.wait_for(received.wait(), timeout=1.0)
 
                 self.assertGreater(len(received_data), 0)
                 self.assertIn(b"/cue/1/start", received_data[0])
@@ -1122,11 +1130,13 @@ class TestOscFire(CueLightTestCase):
     def test_master_go_fires_osc_positions(self) -> None:
         """Master GO fires armed OSC positions and still advances the cue."""
         async def run() -> None:
+            received_event = asyncio.Event()
             received: list[bytes] = []
 
             class Listener(asyncio.DatagramProtocol):
                 def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
                     received.append(data)
+                    received_event.set()
 
             loop = asyncio.get_event_loop()
             transport, _ = await loop.create_datagram_endpoint(
@@ -1158,7 +1168,7 @@ class TestOscFire(CueLightTestCase):
                 state = await recv_type(cws, "full_state")
                 self.assertEqual(state["current_cue_index"], 1)
 
-                await asyncio.sleep(0.2)
+                await asyncio.wait_for(received_event.wait(), timeout=1.0)
                 self.assertGreater(len(received), 0)
 
                 await cws.close()
