@@ -96,6 +96,13 @@ body {
   font-size: 14px;
 }
 
+.position-col .col-header .pos-label-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  color: var(--text);
+}
+
 .position-col .col-header .cue-indicator {
   font-size: 11px;
   color: var(--yellow-bright);
@@ -423,6 +430,30 @@ body {
   font-size: 16px;
   text-align: center;
   text-transform: uppercase;
+}
+
+/* Color picker in rename modal */
+.color-picker {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 10px 0;
+}
+
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.color-swatch:hover { transform: scale(1.15); }
+
+.color-swatch.selected {
+  border-color: var(--text);
+  transform: scale(1.15);
 }
 
 /* OSC column styling */

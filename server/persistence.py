@@ -62,6 +62,7 @@ def load_state() -> AppState:
             health=HealthStatus.RED,
             latency_ms=0.0,
             cue_indicator=pdata.get("cue_indicator", ""),
+            color=pdata.get("color", ""),
         )
 
     # Showfile is reloaded from disk by the showfile module, not from snapshot

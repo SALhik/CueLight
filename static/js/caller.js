@@ -19,6 +19,11 @@
     return id;
   }
 
+  var COLOR_PALETTE = [
+    "#5b8def", "#a855f7", "#f97316", "#ec4899",
+    "#06b6d4", "#6366f1", "#64748b", "#d946ef",
+  ];
+
   // --- State ---
   let ws = null;
   let state = {
@@ -158,9 +163,10 @@
         else dotCls += " osc-unverified";
         healthDotHtml = '<span class="' + dotCls + '"></span> ';
       }
+      var pillStyle = pos.color ? ' style="background:' + escHtml(pos.color) + '"' : "";
       header.innerHTML =
         badgeHtml +
-        '<div class="pos-label">' + healthDotHtml + escHtml(pos.label) + "</div>" +
+        '<div class="pos-label"><span class="pos-label-pill"' + pillStyle + ">" + healthDotHtml + escHtml(pos.label) + "</span></div>" +
         '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>" +
         '<div class="disconnect-badge">DISCONNECTED</div>';
       header.addEventListener("click", function () {
@@ -351,6 +357,22 @@
     renamingClientId = clientId;
     document.getElementById("renameInput").value = currentLabel;
     document.getElementById("renameError").style.display = "none";
+
+    var picker = document.getElementById("colorPicker");
+    picker.innerHTML = "";
+    var currentColor = (state.positions[clientId] || {}).color || "";
+    COLOR_PALETTE.forEach(function (c) {
+      var swatch = document.createElement("div");
+      swatch.className = "color-swatch" + (c === currentColor ? " selected" : "");
+      swatch.style.background = c;
+      swatch.addEventListener("click", function () {
+        picker.querySelectorAll(".color-swatch").forEach(function (s) { s.classList.remove("selected"); });
+        swatch.classList.add("selected");
+        send({ type: "set_color", client_id: clientId, color: c });
+      });
+      picker.appendChild(swatch);
+    });
+
     document.getElementById("renameModal").classList.add("visible");
     document.getElementById("renameInput").focus();
   }

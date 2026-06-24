@@ -13,6 +13,18 @@ from .models import (
 from .persistence import save_state
 
 
+COLOR_PALETTE = [
+    "#5b8def",  # Blue
+    "#a855f7",  # Purple
+    "#f97316",  # Orange
+    "#ec4899",  # Pink
+    "#06b6d4",  # Cyan
+    "#6366f1",  # Indigo
+    "#64748b",  # Slate
+    "#d946ef",  # Fuchsia
+]
+
+
 class StateManager:
     MAX_POSITIONS = 16
 
@@ -26,6 +38,13 @@ class StateManager:
 
     def _persist(self) -> None:
         save_state(self.state)
+
+    def _next_color(self) -> str:
+        used = {p.color for p in self.state.positions.values() if p.color}
+        for c in COLOR_PALETTE:
+            if c not in used:
+                return c
+        return COLOR_PALETTE[len(self.state.positions) % len(COLOR_PALETTE)]
 
     # --- Caller management ---
 
@@ -59,11 +78,13 @@ class StateManager:
                 pos.connected = True
                 pos.label = label
                 pos.health = HealthStatus.GREEN
+                if not pos.color:
+                    pos.color = self._next_color()
             else:
                 if len(self.state.positions) >= self.MAX_POSITIONS:
                     return False
                 self.state.positions[client_id] = Position(
-                    client_id=client_id, label=label
+                    client_id=client_id, label=label, color=self._next_color()
                 )
             self.position_ws[client_id] = ws
             self._update_cue_indicators()
@@ -271,6 +292,23 @@ class StateManager:
             await self._notify_caller_full_state()
             return True
 
+    # --- Color ---
+
+    async def set_color(self, client_id: str, color: str) -> None:
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if not pos:
+                return
+            if color not in COLOR_PALETTE:
+                return
+            pos.color = color
+            self._persist()
+            await self._send_position(client_id, {
+                "type": "color_changed",
+                "color": color,
+            })
+            await self._notify_caller_full_state()
+
     # --- Lock ---
 
     async def set_lock(self, locked: bool) -> None:
@@ -368,6 +406,7 @@ class StateManager:
                     connected=True,
                     type=PositionType.OSC,
                     osc_probe=OscProbeState.UNVERIFIED,
+                    color=self._next_color(),
                 )
                 self.osc_devices[osc_id] = device
             self.state.osc_patch_filename = patch.filename

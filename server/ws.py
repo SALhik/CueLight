@@ -79,6 +79,9 @@ async def _caller_message_loop(ws: WebSocket, manager: StateManager) -> None:
         elif msg_type == "rename":
             await manager.rename_position(msg["client_id"], msg["label"])
 
+        elif msg_type == "set_color":
+            await manager.set_color(msg["client_id"], msg["color"])
+
         elif msg_type == "lock":
             await manager.set_lock(msg["locked"])
 
@@ -150,6 +153,7 @@ async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
         "go": pos.go.value if pos else "idle",
         "locked": manager.state.locked,
         "caller_connected": manager.state.caller_connected,
+        "color": pos.color if pos else "",
     }
     sf = manager.state.showfile
     if sf and pos:
