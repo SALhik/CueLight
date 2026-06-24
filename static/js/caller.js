@@ -153,7 +153,14 @@
       // Header
       var header = document.createElement("div");
       header.className = "col-header";
-      var badgeHtml = isOsc ? '<div class="osc-badge">OSC</div>' : "";
+      var badgeHtml;
+      if (isOsc) {
+        badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
+      } else if (!pos.connected) {
+        badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
+      } else {
+        badgeHtml = '<div class="col-badge"></div>';
+      }
       var healthDotHtml = "";
       if (isOsc) {
         var dotCls = "health-dot";
@@ -167,8 +174,7 @@
       header.innerHTML =
         badgeHtml +
         '<div class="pos-label"><span class="pos-label-pill"' + pillStyle + ">" + healthDotHtml + escHtml(pos.label) + "</span></div>" +
-        '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>" +
-        '<div class="disconnect-badge">DISCONNECTED</div>';
+        '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>";
       header.addEventListener("click", function () {
         openRename(cid, pos.label);
       });

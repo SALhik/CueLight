@@ -109,14 +109,19 @@ body {
   margin-top: 2px;
 }
 
-.position-col .col-header .disconnect-badge {
+.position-col .col-header .col-badge {
   font-size: 9px;
-  color: var(--red-bright);
-  display: none;
+  min-height: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
-.position-col.disconnected .col-header .disconnect-badge {
-  display: block;
+.position-col .col-header .col-badge.disconnect-badge {
+  color: var(--red-bright);
+}
+
+.position-col .col-header .col-badge.osc-badge {
+  color: var(--osc-accent);
 }
 
 .position-col .col-btn {
@@ -461,12 +466,6 @@ body {
   border-left: 3px solid var(--osc-accent);
 }
 
-.position-col.osc-col .osc-badge {
-  font-size: 9px;
-  color: var(--osc-accent);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
 
 .position-col.osc-col .col-btn {
   border-left: 2px solid var(--osc-accent-dim);
