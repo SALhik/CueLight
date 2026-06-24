@@ -50,6 +50,7 @@ class Position:
     osc_probe: OscProbeState = OscProbeState.UNVERIFIED
     osc_fire_result: OscFireResult = OscFireResult.NONE
     osc_trust: str = "none"
+    color: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +67,7 @@ class Position:
             "osc_probe": self.osc_probe.value,
             "osc_fire_result": self.osc_fire_result.value,
             "osc_trust": self.osc_trust,
+            "color": self.color,
         }
 
 

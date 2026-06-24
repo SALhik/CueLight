@@ -47,6 +47,7 @@
     switch (msg.type) {
       case "joined":
         document.getElementById("labelDisplay").textContent = msg.label;
+        applyColor(msg.color || "");
         setStandby(msg.standby);
         setGo(msg.go);
         toggleLock(msg.locked);
@@ -85,6 +86,10 @@
 
       case "label_changed":
         document.getElementById("labelDisplay").textContent = msg.label;
+        break;
+
+      case "color_changed":
+        applyColor(msg.color || "");
         break;
 
       case "cue_info":
@@ -145,6 +150,11 @@
   function showNote(text) {
     noteDisplay.textContent = text;
     noteDisplay.classList.toggle("visible", !!text);
+  }
+
+  function applyColor(color) {
+    var el = document.getElementById("labelDisplay");
+    el.style.background = color || "transparent";
   }
 
   function toggleLock(locked) {
