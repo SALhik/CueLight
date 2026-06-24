@@ -100,6 +100,12 @@ and its **cue number** for the active cue (e.g. "Scene 1.2", cue "3"). If the
 current cue has a **note**, it appears in italic below the header strip. Notes
 update automatically as the show advances and hide when the cue has no note.
 
+### Label color
+
+The position's label in the bottom bezel is displayed as a colored pill,
+matching the color assigned by the Caller. This helps operators confirm they are
+looking at the right device and matches what the Caller sees on their grid.
+
 ### Health dot
 
 A small dot in the bezel reflects this position's own connection health:
@@ -136,9 +142,9 @@ A "Please rotate to landscape" overlay appears in portrait orientation.
 
 ### Per-position column
 
-Each column shows the position's label, its cue indicator (when a showfile is
-loaded), and a "DISCONNECTED" badge if the operator has dropped. It contains
-three buttons:
+Each column shows the position's label inside a **colored pill** for quick
+identification, its cue indicator (when a showfile is loaded), and a
+"DISCONNECTED" badge if the operator has dropped. It contains three buttons:
 
 - **STANDBY** — calls a standby on that one position. The button flashes while
   pending and dims once the operator acknowledges, mirroring the operator's
@@ -222,10 +228,26 @@ When a showfile is loaded and the current cue targets a position that isn't
 connected, a warning banner appears on the Caller (e.g.
 "Cue 3: Fly not connected"), so you know before firing the cue.
 
+### Position colors
+
+Each position is auto-assigned a color from an 8-color palette when it joins
+(or when an OSC patch is loaded). The color appears as a **pill** behind the
+label — on both the Caller grid header and the Position's bottom bezel — so the
+Caller can quickly identify positions at a glance, even with many columns. The
+palette avoids red, green, and yellow to not clash with the standby/go/preset
+button states.
+
+To **change a position's color**, tap its column header to open the Edit
+Position modal and pick a swatch from the color row. The change applies
+immediately and is visible on both the Caller and the operator's screen. Colors
+persist across page reloads.
+
 ### Renaming and removing positions
 
 Tap any position column header to open **Edit Position**:
 
+- **Color** — a row of swatches to change the position's identity color (see
+  *Position colors* above).
 - **Rename** — change the label (validated for uniqueness, max 16 chars). The
   operator's screen updates immediately.
 - **Remove** — kick the position from the show (with confirmation). That device

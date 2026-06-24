@@ -104,9 +104,17 @@ An OSC target is modeled as a virtual position (`PositionType.OSC`) that appears
 
 **OSC positions are runtime-only:** they are NOT written to `state/snapshot.json`. On startup, the patch is reloaded from `patches/` by the stored `osc_patch_filename`. `_send_position()` is a no-op for OSC positions. All OSC I/O runs under the `StateManager._lock` with tight timeouts — never blocks the show.
 
+### Position colors
+
+Each position is auto-assigned a color from an 8-color palette (`COLOR_PALETTE` in `state.py`) when it joins or when an OSC patch is loaded. `_next_color()` picks the first palette color not already in use; if all 8 are taken it wraps around. The caller can override any position's color via the rename modal's swatch picker, which sends a `set_color` message.
+
+Colors are stored in `Position.color` (a hex string like `"#5b8def"`), persisted in `snapshot.json`, and included in `to_dict()` / `full_state`. The palette avoids red, green, and yellow to not clash with standby/go/preset button states.
+
+**Caller view:** the label is wrapped in a `<span class="pos-label-pill">` with an inline `background` style. **Position view:** the `.label-display` element in the bottom bezel gets `background` set via JS. The server sends `color` in the `joined` message and pushes `color_changed` to the position when the caller changes it.
+
 ### Persistence
 
-`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, and `osc_patch_filename`. The showfile and OSC patch are **not** stored in the snapshot — they are reloaded from `showfiles/` and `patches/` by filename. OSC positions are filtered out of the snapshot on write. The EXIT button calls `wipe_state()` which deletes the snapshot.
+`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, color, and `osc_patch_filename`. The showfile and OSC patch are **not** stored in the snapshot — they are reloaded from `showfiles/` and `patches/` by filename. OSC positions are filtered out of the snapshot on write. The EXIT button calls `wipe_state()` which deletes the snapshot.
 
 ### Label uniqueness
 
@@ -121,11 +129,11 @@ Labels are unique (case-insensitive). Enforced at four points:
 
 Two endpoints: `/ws/caller` and `/ws/position`. On connect, the client sends a JSON handshake with `client_id` (and `label` for positions). The server responds with role assignment and initial state.
 
-**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `remove_position`, `load_patch`, `unload_patch`
+**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `set_color`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `remove_position`, `load_patch`, `unload_patch`
 
 **Position messages (client → server):** `ack_standby`, `ack_go`, `rename`, `disconnect`, `pong`
 
-**Server → position messages:** `joined`, `standby_called`, `go_called`, `state_reset`, `lock_changed`, `label_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`
+**Server → position messages:** `joined`, `standby_called`, `go_called`, `state_reset`, `lock_changed`, `label_changed`, `color_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`
 
 **Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `osc_result`, `ping`, `error`
 
