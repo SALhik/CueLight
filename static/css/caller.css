@@ -100,7 +100,7 @@ body {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 10px;
-  color: #fff;
+  color: var(--text);
 }
 
 .position-col .col-header .cue-indicator {
@@ -452,7 +452,7 @@ body {
 .color-swatch:hover { transform: scale(1.15); }
 
 .color-swatch.selected {
-  border-color: #fff;
+  border-color: var(--text);
   transform: scale(1.15);
 }
 

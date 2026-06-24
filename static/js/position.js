@@ -154,7 +154,7 @@
 
   function applyColor(color) {
     var el = document.getElementById("labelDisplay");
-    el.style.background = color || "transparent";
+    el.style.setProperty("--label-background", color || "transparent");
   }
 
   function toggleLock(locked) {

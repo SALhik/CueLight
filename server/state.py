@@ -78,6 +78,8 @@ class StateManager:
                 pos.connected = True
                 pos.label = label
                 pos.health = HealthStatus.GREEN
+                if not pos.color:
+                    pos.color = self._next_color()
             else:
                 if len(self.state.positions) >= self.MAX_POSITIONS:
                     return False
