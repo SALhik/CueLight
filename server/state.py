@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from typing import Any
 
 from fastapi import WebSocket
@@ -11,6 +12,7 @@ from .models import (
     OscPatch, OscProbeState, Position, PositionType,
 )
 from .persistence import save_state
+from .showlog import ShowLog
 
 
 COLOR_PALETTE = [
@@ -32,9 +34,12 @@ class StateManager:
         self.state = initial or AppState()
         self.caller_ws: WebSocket | None = None
         self.position_ws: dict[str, WebSocket] = {}
+        self.observer_ws: dict[str, WebSocket] = {}
         self._lock = asyncio.Lock()
         self.osc_devices: dict[str, OscDevice] = {}
         self._osc_heartbeat_task: asyncio.Task | None = None
+        self._osc_tasks: set[asyncio.Task] = set()
+        self.log = ShowLog()
 
     def _persist(self) -> None:
         save_state(self.state)
@@ -51,19 +56,53 @@ class StateManager:
     async def register_caller(self, ws: WebSocket, client_id: str) -> bool:
         async with self._lock:
             if self.state.caller_connected:
-                return False
+                # Same device reconnecting (e.g. after a silent drop) takes
+                # over from its stale socket; anyone else is rejected.
+                if not client_id or client_id != self.state.caller_client_id:
+                    return False
+                old_ws = self.caller_ws
+                if old_ws is not None and old_ws is not ws:
+                    try:
+                        await old_ws.close()
+                    except Exception:
+                        pass
             self.state.caller_connected = True
             self.state.caller_client_id = client_id
             self.caller_ws = ws
+            self.log.record("caller_connected")
             self._persist()
+            await self._send_observers_full_state()
             return True
 
-    async def unregister_caller(self) -> None:
+    async def unregister_caller(self, ws: WebSocket | None = None) -> None:
         async with self._lock:
+            # A stale socket closing after a takeover must not unregister the new caller
+            if ws is not None and self.caller_ws is not None and self.caller_ws is not ws:
+                return
             self.state.caller_connected = False
             self.caller_ws = None
+            self.log.record("caller_disconnected")
             self._persist()
             await self._broadcast_positions({"type": "caller_disconnected"})
+            await self._send_observers_full_state()
+
+    # --- Observer management ---
+
+    async def register_observer(self, ws: WebSocket, client_id: str, password: str = "") -> bool:
+        if self.state.password_enabled and not self.check_password(password):
+            return False
+        async with self._lock:
+            self.observer_ws[client_id or f"obs:{id(ws)}"] = ws
+            self.log.record("observer_connected")
+            return True
+
+    async def unregister_observer(self, ws: WebSocket) -> None:
+        async with self._lock:
+            for cid, w in list(self.observer_ws.items()):
+                if w is ws:
+                    del self.observer_ws[cid]
+                    self.log.record("observer_disconnected")
+                    break
 
     # --- Position management ---
 
@@ -86,6 +125,7 @@ class StateManager:
                 self.state.positions[client_id] = Position(
                     client_id=client_id, label=label, color=self._next_color()
                 )
+            self.log.record("position_joined", position=label, cue=self._current_cue_seq())
             self.position_ws[client_id] = ws
             self._update_cue_indicators()
             self._persist()
@@ -97,13 +137,20 @@ class StateManager:
             if client_id in self.state.positions:
                 self.state.positions[client_id].connected = False
                 self.state.positions[client_id].health = HealthStatus.RED
+                self.log.record(
+                    "position_disconnected",
+                    position=self.state.positions[client_id].label,
+                    cue=self._current_cue_seq(),
+                )
             self.position_ws.pop(client_id, None)
             self._persist()
             await self._notify_caller_full_state()
 
     async def remove_position(self, client_id: str) -> None:
         async with self._lock:
-            self.state.positions.pop(client_id, None)
+            removed = self.state.positions.pop(client_id, None)
+            if removed:
+                self.log.record("position_removed", position=removed.label)
             ws = self.position_ws.pop(client_id, None)
             if ws:
                 try:
@@ -126,14 +173,13 @@ class StateManager:
                 device = self.osc_devices.get(client_id)
                 if device:
                     pos.osc_probe = OscProbeState.PROBING
-                    probe_state, trust = await osc_mod.probe(device)
-                    pos.osc_probe = probe_state
-                    pos.osc_trust = trust
+                    self._spawn_osc_task(self._probe_and_record([(client_id, device)]))
                 self._persist()
                 await self._notify_caller_full_state()
             else:
                 pos.standby = ButtonState.CALLED
                 pos.armed = False
+                self.log.record("standby_called", position=pos.label, cue=self._current_cue_seq())
                 self._persist()
                 await self._send_position(client_id, {
                     "type": "standby_called",
@@ -146,6 +192,7 @@ class StateManager:
             if not pos or pos.standby != ButtonState.CALLED:
                 return
             pos.standby = ButtonState.ACKED
+            self.log.record("standby_acked", position=pos.label, cue=self._current_cue_seq())
             self._persist()
             await self._notify_caller_full_state()
 
@@ -161,15 +208,14 @@ class StateManager:
                 device = self.osc_devices.get(client_id)
                 if device:
                     cue_number = self._get_cue_number_for_position(pos.label)
-                    result = await osc_mod.fire(device, cue_number)
-                    pos.osc_fire_result = result
-                    await self._send_osc_result(client_id, result.value)
+                    self._spawn_osc_task(self._fire_and_record([(client_id, device, cue_number)]))
                 self._persist()
                 await self._notify_caller_full_state()
             else:
                 pos.standby = ButtonState.IDLE
                 pos.go = ButtonState.CALLED
                 pos.armed = False
+                self.log.record("go_called", position=pos.label, cue=self._current_cue_seq())
                 self._persist()
                 await self._send_position(client_id, {
                     "type": "go_called",
@@ -182,6 +228,7 @@ class StateManager:
             if not pos or pos.go != ButtonState.CALLED:
                 return
             pos.go = ButtonState.IDLE
+            self.log.record("go_acked", position=pos.label, cue=self._current_cue_seq())
             self._persist()
             await self._notify_caller_full_state()
 
@@ -192,18 +239,21 @@ class StateManager:
             if self.state.locked:
                 return
             self._clear_transient_osc_results()
+            self.log.record("master_standby", cue=self._current_cue_seq())
+            probe_jobs: list[tuple[str, OscDevice]] = []
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
                     if pos.type == PositionType.OSC:
                         device = self.osc_devices.get(pos.client_id)
                         if device:
                             pos.osc_probe = OscProbeState.PROBING
-                            probe_state, trust = await osc_mod.probe(device)
-                            pos.osc_probe = probe_state
-                            pos.osc_trust = trust
+                            probe_jobs.append((pos.client_id, device))
                     else:
                         pos.standby = ButtonState.CALLED
+                        self.log.record("standby_called", position=pos.label, cue=self._current_cue_seq())
                         await self._send_position(pos.client_id, {"type": "standby_called"})
+            if probe_jobs:
+                self._spawn_osc_task(self._probe_and_record(probe_jobs))
             self._persist()
             await self._notify_caller_full_state()
 
@@ -212,6 +262,8 @@ class StateManager:
             if self.state.locked:
                 return
             self._clear_transient_osc_results()
+            self.log.record("master_go", cue=self._current_cue_seq())
+            fire_jobs: list[tuple[str, OscDevice, str]] = []
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
                     if pos.type == PositionType.OSC:
@@ -219,16 +271,38 @@ class StateManager:
                         pos.armed = False
                         device = self.osc_devices.get(pos.client_id)
                         if device:
+                            # Resolve the cue number before _advance_cue moves on below
                             cue_number = self._get_cue_number_for_position(pos.label)
-                            result = await osc_mod.fire(device, cue_number)
-                            pos.osc_fire_result = result
-                            await self._send_osc_result(pos.client_id, result.value)
+                            fire_jobs.append((pos.client_id, device, cue_number))
                     else:
                         pos.standby = ButtonState.IDLE
                         pos.go = ButtonState.CALLED
                         pos.armed = False
+                        self.log.record("go_called", position=pos.label, cue=self._current_cue_seq())
                         await self._send_position(pos.client_id, {"type": "go_called"})
-            self._advance_cue()
+            advanced = self._advance_cue()
+            if advanced:
+                self.log.record("cue_advanced", cue=self._current_cue_seq())
+            probe_jobs: list[tuple[str, OscDevice]] = []
+            if advanced and self.state.auto_standby:
+                # Warn the next cue's targets right away
+                for pos in self.state.positions.values():
+                    if not (pos.armed and pos.connected):
+                        continue
+                    if pos.type == PositionType.OSC:
+                        device = self.osc_devices.get(pos.client_id)
+                        if device:
+                            pos.osc_probe = OscProbeState.PROBING
+                            probe_jobs.append((pos.client_id, device))
+                    elif pos.standby == ButtonState.IDLE:
+                        pos.standby = ButtonState.CALLED
+                        self.log.record("standby_called", position=pos.label,
+                                        cue=self._current_cue_seq(), detail="auto")
+                        await self._send_position(pos.client_id, {"type": "standby_called"})
+            if fire_jobs:
+                self._spawn_osc_task(self._fire_and_record(fire_jobs))
+            if probe_jobs:
+                self._spawn_osc_task(self._probe_and_record(probe_jobs))
             self._persist()
             await self._broadcast_positions_cue_info()
             await self._notify_caller_full_state()
@@ -261,6 +335,39 @@ class StateManager:
             self._persist()
             await self._notify_caller_full_state()
 
+    # --- Flash roll call ---
+
+    async def flash_all(self) -> None:
+        async with self._lock:
+            if self.state.locked:
+                return
+            self.log.record("flash_all")
+            for pos in self.state.positions.values():
+                if pos.type == PositionType.HUMAN and pos.connected:
+                    pos.flash = "pending"
+                    await self._send_position(pos.client_id, {"type": "flash"})
+                else:
+                    pos.flash = "none"
+            self._persist()
+            await self._notify_caller_full_state()
+
+    async def ack_flash(self, client_id: str) -> None:
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if not pos or pos.flash != "pending":
+                return
+            pos.flash = "confirmed"
+            self.log.record("flash_confirmed", position=pos.label)
+            self._persist()
+            await self._notify_caller_full_state()
+
+    async def clear_flash(self) -> None:
+        async with self._lock:
+            for pos in self.state.positions.values():
+                pos.flash = "none"
+            self._persist()
+            await self._notify_caller_full_state()
+
     # --- Arm / disarm ---
 
     async def toggle_arm(self, client_id: str) -> None:
@@ -282,6 +389,7 @@ class StateManager:
             for cid, p in self.state.positions.items():
                 if cid != client_id and p.label.lower() == new_label.lower():
                     return False
+            self.log.record("position_renamed", position=new_label, detail=f"was {pos.label}")
             pos.label = new_label
             self._update_cue_indicators()
             self._persist()
@@ -314,6 +422,7 @@ class StateManager:
     async def set_lock(self, locked: bool) -> None:
         async with self._lock:
             self.state.locked = locked
+            self.log.record("locked" if locked else "unlocked")
             self._persist()
             await self._broadcast_positions({"type": "lock_changed", "locked": locked})
             await self._notify_caller_full_state()
@@ -330,24 +439,51 @@ class StateManager:
     def check_password(self, attempt: str) -> bool:
         if not self.state.password_enabled:
             return True
-        return attempt == self.state.password
+        if not isinstance(attempt, str):
+            return False
+        # Compared as bytes: compare_digest rejects non-ASCII str arguments
+        return secrets.compare_digest(attempt.encode(), self.state.password.encode())
 
     # --- Showfile ---
 
     async def load_showfile(self, showfile: Any) -> None:
         async with self._lock:
             self.state.showfile = showfile
+            self.state.showfile_filename = showfile.filename
             self.state.current_cue_index = 0
             self.state.paused = False
+            self.log.record("showfile_loaded", detail=showfile.filename)
             self._arm_current_cue()
             self._update_cue_indicators()
             self._persist()
             await self._broadcast_positions_cue_info()
             await self._notify_caller_full_state()
 
+    async def restore_showfile(self, showfile: Any) -> None:
+        """Startup restore: unlike load_showfile, keeps the persisted cue index."""
+        async with self._lock:
+            self.state.showfile = showfile
+            self.state.showfile_filename = showfile.filename
+            max_index = max(len(showfile.cues) - 1, 0)
+            self.state.current_cue_index = min(self.state.current_cue_index, max_index)
+            if showfile.cues:
+                self._arm_current_cue()
+            self._update_cue_indicators()
+            self._persist()
+            await self._broadcast_positions_cue_info()
+            await self._notify_caller_full_state()
+
+    async def clear_showfile_filename(self) -> None:
+        async with self._lock:
+            self.state.showfile_filename = ""
+            self._persist()
+
     async def unload_showfile(self) -> None:
         async with self._lock:
+            if self.state.showfile:
+                self.log.record("showfile_unloaded", detail=self.state.showfile_filename)
             self.state.showfile = None
+            self.state.showfile_filename = ""
             self.state.current_cue_index = 0
             self.state.paused = False
             for pos in self.state.positions.values():
@@ -362,6 +498,7 @@ class StateManager:
             if not sf or index < 0 or index >= len(sf.cues):
                 return
             self.state.current_cue_index = index
+            self.log.record("cue_jumped", cue=self._current_cue_seq())
             self._arm_current_cue()
             self._update_cue_indicators()
             self._persist()
@@ -373,6 +510,7 @@ class StateManager:
             if not self.state.showfile or self.state.current_cue_index <= 0:
                 return
             self.state.current_cue_index -= 1
+            self.log.record("cue_jumped", cue=self._current_cue_seq())
             self._arm_current_cue()
             self._update_cue_indicators()
             self._persist()
@@ -382,6 +520,14 @@ class StateManager:
     async def set_paused(self, paused: bool) -> None:
         async with self._lock:
             self.state.paused = paused
+            self.log.record("paused" if paused else "resumed", cue=self._current_cue_seq())
+            self._persist()
+            await self._notify_caller_full_state()
+
+    async def set_auto_standby(self, enabled: bool) -> None:
+        async with self._lock:
+            self.state.auto_standby = bool(enabled)
+            self.log.record("auto_standby_on" if enabled else "auto_standby_off")
             self._persist()
             await self._notify_caller_full_state()
 
@@ -410,6 +556,7 @@ class StateManager:
                 )
                 self.osc_devices[osc_id] = device
             self.state.osc_patch_filename = patch.filename
+            self.log.record("patch_loaded", detail=patch.filename)
             self._update_cue_indicators()
             self._persist()
             await self._notify_caller_full_state()
@@ -424,6 +571,8 @@ class StateManager:
             for cid in osc_ids:
                 del self.state.positions[cid]
             self.osc_devices.clear()
+            if self.state.osc_patch_filename:
+                self.log.record("patch_unloaded", detail=self.state.osc_patch_filename)
             self.state.osc_patch_filename = ""
             self._update_cue_indicators()
             self._persist()
@@ -438,14 +587,69 @@ class StateManager:
             ping_template=data.get("ping_template", ""),
             expect_reply=data.get("expect_reply", False),
         )
-        async with self._lock:
-            probe_state, trust = await osc_mod.probe(device)
+        # Probes an ad-hoc device from the editor; touches no state, so no lock
+        probe_state, trust = await osc_mod.probe(device)
         return {"probe": probe_state.value, "trust": trust}
 
     async def clear_osc_patch_filename(self) -> None:
         async with self._lock:
             self.state.osc_patch_filename = ""
             self._persist()
+
+    # --- OSC I/O (runs outside the lock) ---
+
+    def _spawn_osc_task(self, coro: Any) -> None:
+        """Runs OSC network I/O in the background so the lock is never held
+        across a fire/probe timeout."""
+        task = asyncio.create_task(coro)
+        self._osc_tasks.add(task)
+        task.add_done_callback(self._osc_tasks.discard)
+
+    async def _probe_and_record(self, jobs: list[tuple[str, OscDevice]]) -> None:
+        """Probes concurrently, then re-acquires the lock to record results.
+        Must never be awaited while the lock is held."""
+        results = await asyncio.gather(
+            *(osc_mod.probe(device) for _, device in jobs), return_exceptions=True
+        )
+        async with self._lock:
+            changed = False
+            for (client_id, _), result in zip(jobs, results):
+                pos = self.state.positions.get(client_id)
+                if not pos or pos.type != PositionType.OSC:
+                    continue
+                if isinstance(result, tuple):
+                    probe_state, trust = result
+                else:
+                    probe_state, trust = OscProbeState.FAILED, pos.osc_trust
+                if pos.osc_probe != probe_state or pos.osc_trust != trust:
+                    pos.osc_probe = probe_state
+                    pos.osc_trust = trust
+                    changed = True
+            if changed:
+                self._persist()
+                await self._notify_caller_full_state()
+
+    async def _fire_and_record(self, jobs: list[tuple[str, OscDevice, str]]) -> None:
+        """Fires concurrently, then re-acquires the lock to record results.
+        Must never be awaited while the lock is held."""
+        results = await asyncio.gather(
+            *(osc_mod.fire(device, cue_number) for _, device, cue_number in jobs),
+            return_exceptions=True,
+        )
+        async with self._lock:
+            recorded = False
+            for (client_id, _, cue_number), result in zip(jobs, results):
+                pos = self.state.positions.get(client_id)
+                if not pos or pos.type != PositionType.OSC:
+                    continue
+                fire_result = result if isinstance(result, OscFireResult) else OscFireResult.NO_REPLY
+                pos.osc_fire_result = fire_result
+                self.log.record("osc_fired", position=pos.label, cue=cue_number, detail=fire_result.value)
+                await self._send_osc_result(client_id, fire_result.value)
+                recorded = True
+            if recorded:
+                self._persist()
+                await self._notify_caller_full_state()
 
     # --- OSC helpers (call under lock) ---
 
@@ -492,38 +696,30 @@ class StateManager:
                 # 5s interval: less aggressive than the 1s position heartbeat to reduce network load on OSC gear
                 await asyncio.sleep(5.0)
                 async with self._lock:
-                    changed = False
-                    for cid, device in list(self.osc_devices.items()):
-                        pos = self.state.positions.get(cid)
-                        if not pos:
-                            continue
-                        if pos.osc_trust not in ("osc_reply", "tcp_port"):
-                            continue
-                        try:
-                            probe_state, trust = await osc_mod.probe(device)
-                            if pos.osc_probe != probe_state or pos.osc_trust != trust:
-                                pos.osc_probe = probe_state
-                                pos.osc_trust = trust
-                                changed = True
-                        except Exception:
-                            if pos.osc_probe != OscProbeState.FAILED:
-                                pos.osc_probe = OscProbeState.FAILED
-                                changed = True
-                    if changed:
-                        await self._notify_caller_full_state()
+                    jobs = [
+                        (cid, device)
+                        for cid, device in self.osc_devices.items()
+                        if (pos := self.state.positions.get(cid))
+                        and pos.osc_trust in ("osc_reply", "tcp_port")
+                    ]
+                # Probe outside the lock; _probe_and_record re-acquires it briefly
+                if jobs:
+                    await self._probe_and_record(jobs)
         except asyncio.CancelledError:
             pass
 
     # --- Cue helpers (call under lock) ---
 
-    def _advance_cue(self) -> None:
+    def _advance_cue(self) -> bool:
         sf = self.state.showfile
         if not sf or self.state.paused:
-            return
+            return False
         if self.state.current_cue_index < len(sf.cues) - 1:
             self.state.current_cue_index += 1
             self._arm_current_cue()
             self._update_cue_indicators()
+            return True
+        return False
 
     def _arm_current_cue(self) -> None:
         sf = self.state.showfile
@@ -551,6 +747,12 @@ class StateManager:
             if pos:
                 pos.cue_indicator = f"{target.position} {target.cue_number}"
 
+    def _current_cue_seq(self) -> str:
+        sf = self.state.showfile
+        if not sf or self.state.current_cue_index >= len(sf.cues):
+            return ""
+        return str(sf.cues[self.state.current_cue_index].sequence)
+
     def _get_current_cue_info(self) -> dict[str, Any]:
         sf = self.state.showfile
         if not sf or self.state.current_cue_index >= len(sf.cues):
@@ -567,27 +769,37 @@ class StateManager:
     # --- Health ---
 
     async def update_health(self, client_id: str, latency_ms: float) -> None:
-        pos = self.state.positions.get(client_id)
-        if not pos:
-            return
-        pos.latency_ms = latency_ms
-        if latency_ms > 3000:
-            pos.health = HealthStatus.RED
-        elif latency_ms > 1000:
-            pos.health = HealthStatus.YELLOW
-        else:
-            pos.health = HealthStatus.GREEN
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if not pos:
+                return
+            pos.latency_ms = latency_ms
+            if latency_ms > 3000:
+                health = HealthStatus.RED
+            elif latency_ms > 1000:
+                health = HealthStatus.YELLOW
+            else:
+                health = HealthStatus.GREEN
+            # Only push on tier changes, not on every latency sample
+            if health != pos.health:
+                pos.health = health
+                await self._notify_caller_full_state()
 
     async def mark_unhealthy(self, client_id: str) -> None:
-        pos = self.state.positions.get(client_id)
-        if pos:
-            pos.health = HealthStatus.RED
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if pos and pos.health != HealthStatus.RED:
+                pos.health = HealthStatus.RED
+                await self._notify_caller_full_state()
 
     # --- Exit ---
 
     async def exit_show(self) -> None:
         async with self._lock:
             self._stop_osc_heartbeat()
+            for task in list(self._osc_tasks):
+                task.cancel()
+            self._osc_tasks.clear()
             await self._broadcast_positions({"type": "show_ended"})
             for ws in list(self.position_ws.values()):
                 try:
@@ -595,10 +807,48 @@ class StateManager:
                 except Exception:
                     pass
             self.position_ws.clear()
+            # Observers get their sockets closed and auto-reconnect into the new state
+            for ws in list(self.observer_ws.values()):
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+            self.observer_ws.clear()
             self.osc_devices.clear()
             self.state = AppState()
+            self.log.record("show_ended")
             from .persistence import wipe_state
             wipe_state()
+            self.log.rotate()
+
+    # --- Resume ---
+
+    async def resume_show(self) -> bool:
+        """Swaps in the show archived by EXIT (snapshot.bak). The caller's
+        connection is kept; live position sockets are closed so the devices
+        auto-reconnect and merge into the restored state. The archived
+        showfile/patch are reloaded by the caller of this method."""
+        from .persistence import restore_backup
+        async with self._lock:
+            restored = restore_backup()
+            if restored is None:
+                return False
+            self._stop_osc_heartbeat()
+            self.osc_devices.clear()
+            restored.caller_connected = self.state.caller_connected
+            restored.caller_client_id = self.state.caller_client_id
+            self.state = restored
+            for ws in list(self.position_ws.values()):
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+            self.position_ws.clear()
+            self.log.restore()
+            self.log.record("show_resumed")
+            self._persist()
+            await self._notify_caller_full_state()
+            return True
 
     # --- Messaging helpers ---
 
@@ -641,27 +891,23 @@ class StateManager:
             await self._send_position(cid, msg)
 
     async def _notify_caller_full_state(self) -> None:
-        if not self.caller_ws:
+        if self.caller_ws:
+            msg = self.get_full_state_for_caller()
+            try:
+                await self.caller_ws.send_json(msg)
+            except Exception:
+                pass
+        await self._send_observers_full_state()
+
+    async def _send_observers_full_state(self) -> None:
+        if not self.observer_ws:
             return
-        cue_info = self._get_current_cue_info()
-        missing = self._get_missing_positions()
-        msg = {
-            "type": "full_state",
-            "positions": {k: v.to_dict() for k, v in self.state.positions.items()},
-            "locked": self.state.locked,
-            "showfile": self.state.showfile.to_dict() if self.state.showfile else None,
-            "current_cue_index": self.state.current_cue_index,
-            "paused": self.state.paused,
-            "cue_info": cue_info,
-            "missing_positions": missing,
-            "password_enabled": self.state.password_enabled,
-            "password": self.state.password,
-            "osc_patch_filename": self.state.osc_patch_filename,
-        }
-        try:
-            await self.caller_ws.send_json(msg)
-        except Exception:
-            pass
+        msg = self.get_full_state_for_observer()
+        for ws in list(self.observer_ws.values()):
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                pass
 
     def _get_missing_positions(self) -> list[str]:
         sf = self.state.showfile
@@ -685,9 +931,17 @@ class StateManager:
             "showfile": self.state.showfile.to_dict() if self.state.showfile else None,
             "current_cue_index": self.state.current_cue_index,
             "paused": self.state.paused,
+            "auto_standby": self.state.auto_standby,
+            "caller_connected": self.state.caller_connected,
             "cue_info": cue_info,
             "missing_positions": missing,
             "password_enabled": self.state.password_enabled,
             "password": self.state.password,
             "osc_patch_filename": self.state.osc_patch_filename,
         }
+
+    def get_full_state_for_observer(self) -> dict[str, Any]:
+        """Same as the caller's view, but never leaks the join password."""
+        msg = self.get_full_state_for_caller()
+        msg["password"] = ""
+        return msg

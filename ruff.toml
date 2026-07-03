@@ -1,0 +1,6 @@
+# Python 3.10 is the documented minimum (see CLAUDE.md)
+target-version = "py310"
+
+[lint]
+# Ruff's defaults: pycodestyle errors + pyflakes
+select = ["E4", "E7", "E9", "F"]

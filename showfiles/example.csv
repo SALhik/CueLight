@@ -1,0 +1,7 @@
+sequence,scene,targets,note
+1,1.1,LX:1;SND:1,"Opening blackout, thunder"
+2,1.1,LX:2,Witches enter
+3,1.1,SND:2;Fly:1,"Thunder roll, flies in backdrop"
+4,1.2,LX:3,Scene change — camp near Forres
+5,1.2,LX:4;SND:3,"Trumpet flourish, Duncan enters"
+6,1.3,LX:5;SND:4;Fly:2,Heath scene — all positions

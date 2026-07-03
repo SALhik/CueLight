@@ -37,11 +37,13 @@
     password_enabled: false,
     password: "",
     osc_patch_filename: "",
+    auto_standby: false,
   };
   let reconnectDelay = 500;
   let lockHoldTimer = null;
   let renamingClientId = null;
   let oscResultTimers = {};
+  let exited = false;
 
   // --- DOM ---
   const grid = document.getElementById("positionsGrid");
@@ -69,6 +71,7 @@
     };
 
     ws.onclose = () => {
+      if (exited) return;
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 5000);
     };
@@ -101,6 +104,7 @@
         state.password_enabled = msg.password_enabled;
         state.password = msg.password || "";
         state.osc_patch_filename = msg.osc_patch_filename || "";
+        state.auto_standby = !!msg.auto_standby;
         render();
         break;
 
@@ -134,6 +138,10 @@
     renderTransport();
     renderWarnings();
     renderLock();
+    // Keep the roll-call/health list live while Settings is open
+    if (document.getElementById("settingsModal").classList.contains("visible")) {
+      renderHealthList();
+    }
   }
 
   function renderGrid() {
@@ -318,11 +326,36 @@
   // --- Exit ---
   document.getElementById("exitBtn").addEventListener("click", () => {
     if (confirm("End the show and disconnect all positions?")) {
+      exited = true;
       send({ type: "exit" });
-      document.body.innerHTML =
-        '<div style="display:flex;align-items:center;justify-content:center;height:100dvh;font-size:24px;color:#888;">Show ended.</div>';
+      showEndedScreen();
     }
   });
+
+  async function showEndedScreen() {
+    document.body.innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:24px;align-items:center;justify-content:center;height:100dvh;">' +
+      '<div style="font-size:24px;color:#888;">Show ended.</div>' +
+      '<button id="resumeShowBtn" style="display:none;padding:14px 28px;font-size:16px;border-radius:8px;background:var(--osc-accent-dim);color:var(--text);">RESUME SHOW</button>' +
+      "</div>";
+    // The exit message and this fetch race: the server may not have written
+    // the backup yet when the first request lands, so poll briefly.
+    for (let i = 0; i < 10; i++) {
+      try {
+        const info = await (await fetch("/api/backup_info")).json();
+        if (info.exists) {
+          const btn = document.getElementById("resumeShowBtn");
+          btn.style.display = "";
+          btn.addEventListener("click", async () => {
+            const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+            if (res.ok) location.reload();
+          });
+          return;
+        }
+      } catch (e) {}
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
 
   // --- Transport ---
   document.getElementById("prevCueBtn").addEventListener("click", () => {
@@ -422,8 +455,7 @@
     document.getElementById("settingsModal").classList.add("visible");
   });
 
-  async function populateSettings() {
-    // Health list
+  function renderHealthList() {
     const list = document.getElementById("healthList");
     list.innerHTML = "";
     Object.values(state.positions).forEach((pos) => {
@@ -441,14 +473,21 @@
       const dot = `<span class="${dotClass}"></span>`;
       const tag = pos.type === "osc" ? " [OSC]" : "";
       const warning = !pos.connected && pos.type !== "osc" ? ' ⚠️' : '';
+      let flashMark = "";
+      if (pos.flash === "pending") flashMark = ' <span style="color:var(--yellow-bright)">⏳ waiting</span>';
+      else if (pos.flash === "confirmed") flashMark = ' <span style="color:var(--green-bright)">✔ here</span>';
       const metric = pos.type === "osc"
         ? pos.osc_trust === "osc_reply" ? "app confirmed"
           : pos.osc_trust === "tcp_port" ? "port listening"
           : "unverified"
         : Math.round(pos.latency_ms) + "ms";
-      li.innerHTML = `${dot} <span>${escHtml(pos.label)}${tag}${warning}</span> <span style="color:var(--text-dim);margin-left:auto">${metric}</span>`;
+      li.innerHTML = `${dot} <span>${escHtml(pos.label)}${tag}${warning}${flashMark}</span> <span style="color:var(--text-dim);margin-left:auto">${metric}</span>`;
       list.appendChild(li);
     });
+  }
+
+  async function populateSettings() {
+    renderHealthList();
 
     // Showfiles
     try {
@@ -466,6 +505,8 @@
 
     document.getElementById("currentShowfile").textContent =
       state.showfile ? `Loaded: ${state.showfile.filename}` : "No showfile loaded";
+
+    document.getElementById("autoStandbyToggle").checked = state.auto_standby;
 
     // Patches
     try {
@@ -485,7 +526,24 @@
       state.osc_patch_filename ? `Loaded: ${state.osc_patch_filename}` : "No patch loaded";
 
     // Network
-    document.getElementById("networkInfo").textContent = window.location.host;
+    let netText = window.location.host;
+    try {
+      const info = await (await fetch("/api/info")).json();
+      if (info.mdns_host) netText += " — or http://" + info.mdns_host + ":" + info.port + "/";
+    } catch (e) {}
+    document.getElementById("networkInfo").textContent = netText;
+
+    // Previous show (backup left by EXIT)
+    try {
+      const info = await (await fetch("/api/backup_info")).json();
+      const section = document.getElementById("resumeSection");
+      section.style.display = info.exists ? "" : "none";
+      if (info.exists) {
+        document.getElementById("resumeInfo").textContent =
+          (info.showfile_filename || "no showfile") + ", " + info.position_count +
+          (info.position_count === 1 ? " position" : " positions");
+      }
+    } catch (e) {}
 
     // Password
     document.getElementById("pwToggle").checked = state.password_enabled;
@@ -510,6 +568,10 @@
     window.open("/editor", "_blank");
   });
 
+  document.getElementById("autoStandbyToggle").addEventListener("change", (e) => {
+    send({ type: "set_auto_standby", enabled: e.target.checked });
+  });
+
   document.getElementById("loadPatchBtn").addEventListener("click", () => {
     const filename = document.getElementById("patchSelect").value;
     if (filename) {
@@ -525,6 +587,32 @@
 
   document.getElementById("editPatchBtn").addEventListener("click", () => {
     window.open("/editor#patches", "_blank");
+  });
+
+  document.getElementById("resumeShowSettingsBtn").addEventListener("click", async () => {
+    if (!confirm("Replace the current show with the previous one?")) return;
+    try {
+      const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+      if (res.ok) closeModal("settingsModal");
+    } catch (e) {}
+  });
+
+  // --- Flash roll call ---
+  document.getElementById("flashAllBtn").addEventListener("click", () => {
+    send({ type: "flash_all" });
+  });
+
+  document.getElementById("clearFlashBtn").addEventListener("click", () => {
+    send({ type: "clear_flash" });
+  });
+
+  // --- Show log ---
+  document.getElementById("downloadLogBtn").addEventListener("click", () => {
+    window.open("/api/showlog?format=csv");
+  });
+
+  document.getElementById("viewLogBtn").addEventListener("click", () => {
+    window.open("/api/showlog");
   });
 
   document.getElementById("pwToggle").addEventListener("change", (e) => {
@@ -545,6 +633,16 @@
     try {
       const url = `http://${window.location.host}/join`;
       document.getElementById("urlText").textContent = url;
+
+      const mdnsText = document.getElementById("mdnsText");
+      mdnsText.style.display = "none";
+      try {
+        const info = await (await fetch("/api/info")).json();
+        if (info.mdns_host) {
+          mdnsText.textContent = `or http://${info.mdns_host}:${info.port}/join`;
+          mdnsText.style.display = "block";
+        }
+      } catch (e) {}
 
       let qrUrl = `/api/qr`;
       if (state.password_enabled && state.password) {

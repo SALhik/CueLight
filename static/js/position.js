@@ -17,6 +17,7 @@
   const healthDot = document.getElementById("healthDot");
   const lockOverlay = document.getElementById("lockOverlay");
   const noteDisplay = document.getElementById("noteDisplay");
+  const flashOverlay = document.getElementById("flashOverlay");
 
   let ws = null;
   let standbyState = "idle";
@@ -67,12 +68,18 @@
         break;
 
       case "standby_called":
+        hideFlash();
         setStandby("called");
         break;
 
       case "go_called":
+        hideFlash();
         setStandby("idle");
         setGo("called");
+        break;
+
+      case "flash":
+        flashOverlay.classList.add("visible");
         break;
 
       case "state_reset":
@@ -161,6 +168,15 @@
     lockOverlay.classList.toggle("visible", locked);
   }
 
+  function hideFlash() {
+    flashOverlay.classList.remove("visible");
+  }
+
+  flashOverlay.addEventListener("click", () => {
+    hideFlash();
+    ws.send(JSON.stringify({ type: "ack_flash" }));
+  });
+
   standbyBtn.addEventListener("click", () => {
     if (standbyState === "called") {
       setStandby("acked");
@@ -180,6 +196,27 @@
     localStorage.removeItem("cuelight_label");
     location.href = "/join";
   });
+
+  // --- Running-mode dimming (cycles off → dim → red → off) ---
+  const dimOverlay = document.getElementById("dimOverlay");
+  const dimBtn = document.getElementById("dimBtn");
+  const DIM_MODES = ["off", "dim", "red"];
+  let dimMode = localStorage.getItem("cuelight_dim_mode") || "off";
+  if (DIM_MODES.indexOf(dimMode) === -1) dimMode = "off";
+
+  function applyDim() {
+    dimOverlay.className = "dim-overlay" + (dimMode === "off" ? "" : " " + dimMode);
+    dimBtn.textContent =
+      dimMode === "off" ? "DIM" : dimMode === "dim" ? "DIM: ON" : "DIM: RED";
+    localStorage.setItem("cuelight_dim_mode", dimMode);
+  }
+
+  dimBtn.addEventListener("click", () => {
+    dimMode = DIM_MODES[(DIM_MODES.indexOf(dimMode) + 1) % DIM_MODES.length];
+    applyDim();
+  });
+
+  applyDim();
 
   connect();
 })();

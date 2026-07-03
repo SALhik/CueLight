@@ -15,6 +15,7 @@
   <div class="join-info-screen" id="joinInfoScreen" style="display:none">
     <img class="qr-img" id="qrImg" width="250" height="250" alt="QR">
     <div class="url-text" id="urlText"></div>
+    <div class="url-text" id="mdnsText" style="display:none;color:var(--text-dim)"></div>
     <div class="pw-text" id="pwText" style="display:none"></div>
   </div>
 
@@ -62,6 +63,10 @@
       <h2>Settings</h2>
 
       <h3>Health & Latency</h3>
+      <div class="field">
+        <button class="modal-btn" id="flashAllBtn">Flash all positions</button>
+        <button class="modal-btn" id="clearFlashBtn">Clear check</button>
+      </div>
       <ul class="health-list" id="healthList"></ul>
 
       <h3>Showfile</h3>
@@ -76,6 +81,10 @@
         </div>
         <div class="field">
           <button class="modal-btn" id="editShowfileBtn">Edit showfile…</button>
+        </div>
+        <div class="field">
+          <label>Auto-standby next cue after GO</label>
+          <input type="checkbox" id="autoStandbyToggle">
         </div>
       </div>
 
@@ -97,6 +106,20 @@
       <h3>Network</h3>
       <div class="field">
         <label id="networkInfo">Loading…</label>
+      </div>
+
+      <h3>Show Log</h3>
+      <div class="field">
+        <button class="modal-btn" id="downloadLogBtn">Download CSV</button>
+        <button class="modal-btn" id="viewLogBtn">View JSON</button>
+      </div>
+
+      <div id="resumeSection" style="display:none">
+        <h3>Previous Show</h3>
+        <div class="field">
+          <label id="resumeInfo"></label>
+          <button class="modal-btn" id="resumeShowSettingsBtn">Resume…</button>
+        </div>
       </div>
 
       <h3>Security</h3>
@@ -136,6 +159,7 @@
   </div>
 
   <div class="lock-overlay" id="lockOverlay">SYSTEM LOCKED</div>
+  <script src="/static/js/keepawake.js"></script>
   <script src="/static/js/caller.js"></script>
 </body>
 </html>

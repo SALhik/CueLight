@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .files import require_safe_filename
 from .models import OscDevice, OscPatch
 
 PATCHES_DIR = Path(__file__).resolve().parent.parent / "patches"
@@ -15,6 +16,7 @@ def list_patches() -> list[str]:
 
 
 def load_patch(filename: str) -> OscPatch:
+    require_safe_filename(filename)
     path = PATCHES_DIR / filename
     if not path.exists():
         raise FileNotFoundError(f"Patch not found: {filename}")
@@ -57,6 +59,7 @@ def validate_patch(data: dict[str, Any]) -> list[str]:
 
 
 def save_patch(filename: str, data: dict[str, Any]) -> None:
+    require_safe_filename(filename)
     errors = validate_patch(data)
     if errors:
         raise ValueError(f"Invalid patch data: {'; '.join(errors)}")

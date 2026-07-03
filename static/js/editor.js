@@ -102,6 +102,66 @@
     }
   });
 
+  // --- CSV import/export ---
+  var csvFileInput = document.getElementById("csvFileInput");
+
+  document.getElementById("importCsvBtn").addEventListener("click", function () {
+    csvFileInput.value = "";
+    csvFileInput.click();
+  });
+
+  csvFileInput.addEventListener("change", function () {
+    var file = csvFileInput.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = async function () {
+      var res = await fetch("/api/csv/import", {
+        method: "POST",
+        headers: { "Content-Type": "text/csv" },
+        body: reader.result,
+      });
+      var data = await res.json();
+      if (!res.ok) {
+        showStatus("statusMsg", "CSV errors: " + (data.errors || []).join("; "), true);
+        return;
+      }
+      readCuesFromDOM();
+      if (cues.length > 0 && !confirm("Replace the current cue list with the imported CSV?")) return;
+      cues = data.cues.map(function (c) {
+        return {
+          sequence: c.sequence,
+          scene: c.scene || "",
+          targets: (c.targets || []).map(function (t) { return t.position + ":" + t.cue_number; }).join(", "),
+          note: c.note || "",
+        };
+      });
+      renderCues();
+      showStatus("statusMsg", "Imported " + cues.length + " cues from " + file.name);
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById("exportCsvBtn").addEventListener("click", async function () {
+    readCuesFromDOM();
+    var data = {
+      cues: cues.map(function (c) {
+        return { sequence: c.sequence, scene: c.scene, targets: parseTargets(c.targets), note: c.note };
+      }),
+    };
+    var res = await fetch("/api/csv/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) { showStatus("statusMsg", "Export failed", true); return; }
+    var blob = await res.blob();
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (currentFilename || "showfile").replace(/\.json$/, "") + ".csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
   function parseTargets(str) {
     return str.split(",").map(function (s) { return s.trim(); }).filter(Boolean).map(function (s) {
       var parts = s.split(":");

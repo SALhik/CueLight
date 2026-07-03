@@ -25,17 +25,29 @@ The server listens on all interfaces on port 8000. Find the host machine's LAN
 IP (Settings shows it, or `/api/info` returns it) and share
 `http://<ip>:8000` with the other devices.
 
-### The three roles / pages
+The server also advertises itself on the LAN via mDNS/Bonjour as
+**`cuelight.local`**, so devices that support it (iPhones/iPads, Macs,
+Windows 10+, newer Android) can simply type `http://cuelight.local:8000`
+instead of an IP. This is best-effort: if the name is taken or the network
+blocks multicast, everything falls back to the IP and QR flow. The Caller's
+Settings → Network and the join-info screen both show the friendly URL when
+it's active.
+
+### The roles / pages
 
 | URL | Page | Who uses it |
 |---|---|---|
 | `/` | Caller console | Stage manager (one device only) |
 | `/join` → `/position` | Position console | Each operator |
+| `/observer` | Observer console (read-only) | Director, production manager, backup caller |
 | `/editor` | Showfile & patch editor | Whoever prepares the cue list or venue patch |
 
 The **first** device to open `/` claims the Caller role. If a second device
 opens `/` while a Caller is already connected, it is automatically redirected
-to the join page to become a Position instead.
+to the join page to become a Position instead. The Caller's own device can
+always reclaim its seat: reloading the page (or reconnecting after the iPad
+slept) takes over from the stale connection without the Positions ever seeing
+a "caller disconnected" warning.
 
 ---
 
@@ -125,6 +137,39 @@ The **Reset** button on the Position console disconnects this device and returns
 it to the join page (clearing the saved label), so the phone can re-join under a
 new name or hand off to someone else.
 
+### Flash check (roll call)
+
+Before the house opens, the Caller can run a **flash check**: every connected
+Position's screen blinks bright yellow with "FLASH CHECK — TAP TO CONFIRM."
+Tapping the overlay confirms the operator is present and awake; the Caller
+watches the confirmations tick in live (see *Settings → Health & Latency*).
+An incoming standby or GO dismisses the overlay automatically, so a real cue
+can never be blocked by it.
+
+### Screen dimming (running mode)
+
+Backstage must be dark, and a phone at normal brightness glows like a lantern.
+The **DIM** button in the bottom bezel cycles through three modes:
+
+- **off** — normal brightness.
+- **DIM: ON** — a dark overlay drops the whole screen to a fraction of its
+  light output. Cue colors still read clearly in a dark wing.
+- **DIM: RED** — the same, with a red cast that preserves night vision (like
+  backstage running lights).
+
+The overlay is purely visual — every tap passes straight through it, so acking
+a standby works exactly the same while dimmed. The chosen mode survives page
+reloads. Use it only if needed; it's off by default.
+
+### Screen keep-awake
+
+Phones dim and lock themselves — fatal if it happens right before a cue. After
+the operator's first tap on the page, the console plays an invisible muted
+looping video, which keeps the screen awake on iOS Safari and Android Chrome
+(the proper Wake Lock API needs HTTPS, which a LAN HTTP app can't use). No
+setup needed; one tap anywhere arms it. The Caller and Observer pages do the
+same.
+
 ### End-of-show / removal messages
 
 - **Show ended** — when the Caller hits EXIT, every Position shows
@@ -187,28 +232,46 @@ The **LOCK** button freezes the whole system:
 
 This is designed for safety during scene changes or breaks.
 
-### EXIT (end the show)
+### EXIT (end the show) — and resuming
 
 The **EXIT** button (with a confirmation prompt) ends the show: it disconnects
-all positions, broadcasts "show ended," and **wipes all saved state**
-(deletes `state/snapshot.json`). Use it only when you truly want to clear
-everything.
+all positions and broadcasts "show ended." The saved state is **archived, not
+destroyed** — `state/snapshot.json` is renamed to `state/snapshot.bak` (and the
+show log to `showlog.bak`), so a mis-tapped EXIT in the middle of tech is
+recoverable:
+
+- The "Show ended" screen offers a **RESUME SHOW** button when a backup exists.
+- In a new show, **Settings → Previous Show** shows what's in the backup
+  (showfile name, position count) and a **Resume…** button.
+
+Resuming restores the positions, lock, password, cue index, showfile, OSC patch,
+and show log. Operators just reload their phones (or wait for auto-reconnect)
+and land back in their seats. Starting a *new* show after an EXIT overwrites the
+backup at the next EXIT.
 
 ### Settings
 
-The **SETTINGS** button opens a modal with five sections:
+The **SETTINGS** button opens a modal with these sections:
 
 1. **Health & Latency** — a live list of every position (human and OSC) with its
    health dot, measured latency (human) or trust tier (OSC), and a ⚠️ marker for
-   disconnected human positions.
+   disconnected human positions. The **Flash all positions** button runs the
+   roll call: each connected Position blinks until its operator taps to confirm,
+   and the list shows "⏳ waiting" / "✔ here" per position, updating live.
+   **Clear check** resets the markers.
 2. **Showfile** — shows the loaded file, a dropdown to **Load** any file in
-   `showfiles/`, an **Unload** button, and an **Edit showfile…** button that
-   opens the editor in a new tab.
+   `showfiles/`, an **Unload** button, an **Edit showfile…** button that
+   opens the editor in a new tab, and the **Auto-standby next cue after GO**
+   toggle (see *Showfiles*).
 3. **OSC Patch** — shows the loaded patch, a dropdown to **Load** any patch in
    `patches/`, an **Unload** button, and an **Edit patches…** button that opens
    the editor's Patches tab. See *OSC outbound*.
-4. **Network** — the server host/address to share with operators.
-5. **Security** — the password toggle and field (see *Password protection*).
+4. **Network** — the server host/address to share with operators, including the
+   `cuelight.local` mDNS name when it's active.
+5. **Show Log** — download the show's event log as CSV, or view the raw JSON
+   (see *Show log*).
+6. **Previous Show** — appears only when an EXIT backup exists; resumes it.
+7. **Security** — the password toggle and field (see *Password protection*).
 
 ### Join info / QR code
 
@@ -299,6 +362,16 @@ The transport row (visible only when a showfile is loaded) has:
 - **JUMP** — opens a list of every cue (sequence, scene, targets); tap one to
   jump directly to it. The current cue is highlighted.
 
+### Auto-standby (optional)
+
+**Settings → Showfile → Auto-standby next cue after GO** (off by default).
+When enabled, every GO ARMED that advances the cue also calls standby on the
+*next* cue's targets immediately — matching the warn → standby → go rhythm
+without the Caller having to tap STANDBY ARMED between every cue. Armed OSC
+positions get their readiness probe instead. Jumping or stepping back through
+cues never auto-calls standby; only a fired GO does. The setting persists
+across server restarts.
+
 ### Unloading
 
 **Settings → Showfile → Unload** removes the showfile, clears cue indicators on
@@ -371,6 +444,36 @@ and **OSC Patches**.
 **Save** validates the cue list server-side and writes it to `showfiles/`. If
 validation fails (missing `show_name`, missing/duplicate `sequence`, missing
 `scene`/`targets`, etc.), the errors are shown and nothing is written.
+
+#### CSV import / export
+
+Cue sheets usually live in spreadsheets, so the Showfiles tab can exchange the
+cue list with CSV:
+
+- **Import CSV…** — pick a `.csv` file; its rows replace the editor's cue list
+  (with a confirmation if you already have cues). Parse errors are reported by
+  row number and nothing is replaced.
+- **Export CSV** — downloads the current cue list as a `.csv` named after the
+  loaded file.
+
+The format is one row per cue with a required header row:
+
+```csv
+sequence,scene,targets,note
+1,1.1,LX:1;SND:1,"Opening blackout, thunder"
+2,1.2,Fly 1:12a,Witches enter
+```
+
+- Columns may be in any order; unknown columns are ignored; `note` is optional.
+- **`targets`** holds `POSITION:CUE` pairs separated by `;`. The split is on the
+  *last* colon, so labels may contain spaces (`Fly 1:12a` → position "Fly 1",
+  cue "12a").
+- Excel's UTF-8 BOM is handled; quoted cells with commas work as usual.
+
+A sample ships at `showfiles/example.csv` (the CSV twin of `example.json`) —
+open it in a spreadsheet as a starting template. Conversion happens server-side
+(`POST /api/csv/import` and `POST /api/csv/export`), so the dialect is identical
+in both directions.
 
 ### OSC Patches tab
 
@@ -519,6 +622,10 @@ The GO button shows the result for **2 seconds**:
 - **NO REPLY** (flashing red) — the fire was dispatched but no reply was received
   within 400ms. This means "couldn't confirm it landed," not "didn't fire."
 
+OSC network I/O runs in the background: fires and probes for a cue happen
+concurrently, and a slow or unreachable device never delays the cue lights on
+human positions or blocks the Caller's next action.
+
 ### Background heartbeat
 
 Devices that have been probed at least once with a confirmable tier (OSC reply or
@@ -535,6 +642,49 @@ add device rows, and save.
 Each device row has a **Preset** selector that prefills fields for common
 consoles (QLab 5, grandMA3, TheatreMix). A **Test** button per row runs the
 probe and shows the resulting trust tier.
+
+---
+
+## The Observer console (read-only)
+
+`/observer` is a read-only mirror of the Caller's grid, meant for a director,
+production manager, or a **standby caller device**. Like the Caller console it
+is designed for an iPad in landscape (a rotate prompt appears in portrait).
+
+- Reach it from the join page via **Watch as Observer (read-only)**. If the show
+  is password-protected, the same password is required.
+- Observers see the live position columns (standby/acked/GO states, arming,
+  colors, OSC probe states), the transport row, missing-position warnings, and a
+  LOCKED tag — but nothing on the page sends commands. Any number of observers
+  can watch at once. The join password is never sent to observers.
+- The status bar shows whether the Caller is connected. If the Caller drops, the
+  bar flashes **CALLER DISCONNECTED** and a **TAKE OVER AS CALLER** button
+  appears. Taking over is always a deliberate tap (never automatic): it opens
+  the Caller console on this device, which claims the now-vacant caller seat
+  with the full show state intact.
+
+---
+
+## Show log
+
+The server keeps a timestamped log of everything that happens in the show:
+standbys and acks (with the operator and the cue they happened on), GOs, master
+actions, cue advances and jumps, OSC fire results, lock/unlock, pauses,
+positions joining/leaving, showfile/patch loads, and flash-check confirmations.
+Auto-called standbys are marked `auto` so a report distinguishes them from
+manual calls.
+
+- **Download:** Caller → **Settings → Show Log** — CSV (columns
+  `time,event,position,cue,detail`) for spreadsheets, or raw JSON at
+  `GET /api/showlog`.
+- **Persistence:** entries append to `state/showlog.jsonl` as they happen, so
+  the log survives a server restart mid-show.
+- **Lifecycle:** EXIT archives the log next to the state backup; resuming the
+  show brings it back, so a resumed show's report is complete. A new show starts
+  a fresh log.
+
+It doubles as a debugging trail: if a cue was missed, the log shows exactly
+when the standby went out and when (or whether) it was acknowledged.
 
 ---
 
@@ -582,11 +732,12 @@ backoff (starting at 0.5s, capped at 5s). Because identity is stored in
 
 The server writes `state/snapshot.json` on every change (debounced at 100ms).
 If the server restarts, it restores positions (marked disconnected until they
-reconnect), the lock state, the password, the paused flag, and the current cue
-index. The **showfile is not stored in the snapshot** — reload it by filename
-after a restart. **OSC positions** are also not stored; they are reconstructed
-from the loaded patch file on startup (the patch filename is persisted). The
-EXIT button deletes the snapshot entirely.
+reconnect), the lock state, the password, the paused flag, the auto-standby
+setting, and the current cue index. The **showfile and OSC patch are reloaded
+automatically** on startup by their stored filenames, and the show resumes at
+the cue it was on — a mid-show server restart doesn't lose your place. The EXIT
+button archives the snapshot to `state/snapshot.bak` instead of deleting it, so
+an accidental EXIT can be undone with **Resume** (see *EXIT — and resuming*).
 
 ---
 
@@ -600,19 +751,26 @@ useful for integration or debugging.
 | `GET /` | Caller console page |
 | `GET /join` | Join page |
 | `GET /position` | Position console page |
+| `GET /observer` | Observer console page (read-only) |
 | `GET /editor` | Showfile & patch editor page |
-| `GET /api/info` | Server IP, port, caller-connected and password-enabled flags |
+| `GET /api/info` | Server IP, port, mDNS hostname, caller-connected and password-enabled flags |
 | `POST /api/check_password` | Validate a join password |
 | `POST /api/check_label` | Check a label is free before joining |
 | `GET /api/showfiles` | List available showfile names |
 | `GET /api/showfile/{filename}` | Fetch a showfile's JSON |
 | `POST /api/showfile/{filename}` | Validate and save a showfile |
+| `POST /api/csv/import` | Convert CSV text to showfile cues (or row errors) |
+| `POST /api/csv/export` | Convert showfile JSON to downloadable CSV |
 | `GET /api/patches` | List available OSC patch names |
 | `GET /api/patch/{filename}` | Fetch a patch's JSON |
 | `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) |
+| `GET /api/showlog` | Show event log as JSON (`?format=csv` for CSV download) |
+| `GET /api/backup_info` | Whether an EXIT backup exists (plus showfile/position count) |
+| `POST /api/resume_show` | Restore the EXIT backup into the running server |
 | `GET /api/qr?password=…` | PNG QR code for the join URL |
 | `WS /ws/caller` | Caller real-time channel |
 | `WS /ws/position` | Position real-time channel |
+| `WS /ws/observer` | Observer real-time channel (read-only mirror) |
 
 ---
 
@@ -624,8 +782,11 @@ useful for integration or debugging.
    OSC devices appear as columns in the grid alongside human positions.
 4. (Optional) Set a join password in Settings → Security.
 5. Show **Join info**; operators scan the QR or open `/join`, enter their label,
-   and connect.
-6. Run the show:
+   and connect. A director or backup caller can pick **Watch as Observer** on
+   the join page instead.
+6. Before the house opens, run a **flash check** (Settings → Health & Latency →
+   Flash all positions) and watch every operator confirm.
+7. Run the show:
    - **Manual:** use each column's STANDBY / GO, or arm positions with PRESET and
      drive them together with the MASTER buttons.
    - **Showfile:** PRESET arming is automatic (including OSC positions); tap
@@ -633,5 +794,6 @@ useful for integration or debugging.
      use PREV / JUMP / PAUSE as needed.
    - **OSC:** STANDBY on an OSC column probes the device; GO fires the OSC
      message. Results (SENT / NO REPLY) show on the button for 2 seconds.
-7. **LOCK** during holds; **RESET ALL** between acts.
-8. **EXIT** to end the show and clear all state.
+8. **LOCK** during holds; **RESET ALL** between acts.
+9. **EXIT** to end the show. Afterwards, download the show log from Settings,
+   or **RESUME SHOW** if the EXIT was a mistake.

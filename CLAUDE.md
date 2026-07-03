@@ -101,8 +101,11 @@ An OSC target is modeled as a virtual position (`PositionType.OSC`) that appears
 - `server/patch.py` — load/save/validate patch files from `patches/` directory
 - `server/osc.py` — `fire()` and `probe()` with tight 400ms timeouts, fully async
 - `server/state.py` — `load_patch()`, `unload_patch()`, OSC branches in `call_go`/`call_standby`/`go_armed`/`standby_armed`, ~5s heartbeat for confirmable devices
+- `server/files.py` — `require_safe_filename()`: showfile/patch filenames must be plain `.json` basenames (no path traversal); enforced in load/save and returned as HTTP 400
 
-**OSC positions are runtime-only:** they are NOT written to `state/snapshot.json`. On startup, the patch is reloaded from `patches/` by the stored `osc_patch_filename`. `_send_position()` is a no-op for OSC positions. All OSC I/O runs under the `StateManager._lock` with tight timeouts — never blocks the show.
+**OSC positions are runtime-only:** they are NOT written to `state/snapshot.json`. On startup, the patch is reloaded from `patches/` by the stored `osc_patch_filename`. `_send_position()` is a no-op for OSC positions.
+
+**OSC I/O never holds the lock:** action handlers mutate state under the lock (setting `PROBING`, clearing standby, resolving `{cue}` numbers), then hand the network I/O to a background task via `_spawn_osc_task()`. `_probe_and_record()` / `_fire_and_record()` run all fires/probes for a batch concurrently (`asyncio.gather`), then re-acquire the lock to record results and notify the caller. They must never be awaited while the lock is held. Human positions therefore get their `standby_called`/`go_called` immediately — a slow OSC device can't delay them — and the caller sees an interim `full_state` with `osc_probe: "probing"` before the settled result arrives.
 
 ### Position colors
 
@@ -114,7 +117,13 @@ Colors are stored in `Position.color` (a hex string like `"#5b8def"`), persisted
 
 ### Persistence
 
-`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, color, and `osc_patch_filename`. The showfile and OSC patch are **not** stored in the snapshot — they are reloaded from `showfiles/` and `patches/` by filename. OSC positions are filtered out of the snapshot on write. The EXIT button calls `wipe_state()` which deletes the snapshot.
+`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. `save_state()` serializes immediately (so the timer thread never reads live state) and only the disk write is deferred. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, color, `auto_standby`, `osc_patch_filename`, and `showfile_filename`. The showfile and OSC patch contents are **not** stored in the snapshot — the lifespan calls `_restore_files()` in main.py to reload both from `showfiles/` and `patches/` by the stored filenames (patch first, so showfile arming includes OSC positions). `restore_showfile()` keeps the persisted cue index (clamped to the cue count) instead of resetting to 0, so a server restart mid-show resumes at the right cue. OSC positions are filtered out of the snapshot on write.
+
+**EXIT and resume:** the EXIT button calls `wipe_state()`, which cancels any pending debounced write and renames the snapshot to `state/snapshot.bak` (not deletes). `GET /api/backup_info` reports whether a backup exists; `POST /api/resume_show` calls `StateManager.resume_show()`, which promotes the backup back via `restore_backup()`, keeps the current caller connection, closes live position sockets (their devices auto-reconnect and merge into the restored state), restores the show log, and then the endpoint reloads patch+showfile via `_restore_files()`. The caller UI offers resume on the post-EXIT screen and in Settings ("Previous Show" section).
+
+### Show log
+
+`server/showlog.py` — `ShowLog` keeps an in-memory list of `{time, event, position, cue, detail}` entries and appends each to `state/showlog.jsonl` (so it survives restarts; loaded back in `__init__`). `StateManager` owns one as `self.log` and records under the lock: button events (`standby_called`/`standby_acked`/`go_called`/`go_acked`, with the current cue sequence), `master_standby`/`master_go`, `cue_advanced`/`cue_jumped`, `osc_fired` (detail = sent/no_reply), lock/pause/rename/join/disconnect/showfile/patch events, and flash-check confirmations. Auto-standby calls carry `detail="auto"`. OSC heartbeat probes are deliberately NOT logged (noise). `GET /api/showlog` serves JSON, `?format=csv` a CSV attachment. `exit_show()` records `show_ended` then `log.rotate()` (archive to `showlog.bak`); `resume_show()` calls `log.restore()`.
 
 ### Label uniqueness
 
@@ -127,21 +136,35 @@ Labels are unique (case-insensitive). Enforced at four points:
 
 ### WebSocket protocol
 
-Two endpoints: `/ws/caller` and `/ws/position`. On connect, the client sends a JSON handshake with `client_id` (and `label` for positions). The server responds with role assignment and initial state.
+Three endpoints: `/ws/caller`, `/ws/position`, and `/ws/observer`. On connect, the client sends a JSON handshake with `client_id` (plus `label` for positions, `password` for observers). The server responds with role assignment and initial state. A caller reconnecting with the **same** `client_id` takes over from its stale socket (the old one is closed without broadcasting `caller_disconnected`); a different `client_id` is rejected while a caller is connected. Malformed messages (missing/wrong-typed fields) are ignored by both message loops rather than tearing down the connection.
 
-**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `set_color`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `remove_position`, `load_patch`, `unload_patch`
+**Observers are read-only:** any number may connect (`observer_ws` dict in StateManager); they receive every `full_state` the caller gets, built by `get_full_state_for_observer()` which blanks `password`. Everything an observer sends is ignored. If `password_enabled`, the handshake password is checked and rejected with `role_rejected`. `register_caller`/`unregister_caller` push a full_state to observers so they see `caller_connected` flip; the observer page then offers a manual TAKE OVER button that simply navigates to `/` (a vacant caller seat accepts any client_id). `full_state` includes `caller_connected` and `auto_standby` fields.
 
-**Position messages (client → server):** `ack_standby`, `ack_go`, `rename`, `disconnect`, `pong`
+**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `set_color`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `set_auto_standby`, `flash_all`, `clear_flash`, `remove_position`, `load_patch`, `unload_patch`
 
-**Server → position messages:** `joined`, `standby_called`, `go_called`, `state_reset`, `lock_changed`, `label_changed`, `color_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`
+**Position messages (client → server):** `ack_standby`, `ack_go`, `ack_flash`, `rename`, `disconnect`, `pong`
+
+**Server → position messages:** `joined`, `standby_called`, `go_called`, `flash`, `state_reset`, `lock_changed`, `label_changed`, `color_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`
 
 **Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `osc_result`, `ping`, `error`
 
-**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save)
+**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save), `GET /api/showlog` (`?format=csv`), `GET /api/backup_info`, `POST /api/resume_show`, `POST /api/csv/import`, `POST /api/csv/export`
+
+### Flash roll call
+
+`flash_all` sets `Position.flash = "pending"` on every connected human position and sends them a `flash` message (OSC and disconnected positions are reset to `"none"`); the position shows a blinking overlay until tapped, which sends `ack_flash` → `flash = "confirmed"`. `clear_flash` resets all. `flash` is transient — serialized in `to_dict()` but never restored from the snapshot. The caller UI lives in Settings (Health list shows waiting/here markers and re-renders on every `full_state` while the modal is open).
+
+### Auto-standby
+
+`AppState.auto_standby` (persisted, off by default, toggled via `set_auto_standby`). In `go_armed`, when `_advance_cue()` actually advances (returns True) and the option is on, the newly-armed positions get standby immediately: humans with idle standby → `CALLED` + `standby_called` (logged with `detail="auto"`); armed OSC positions get a probe batch. Jump/prev never auto-call.
+
+### Showfile CSV
+
+`server/showcsv.py` — `cues_to_csv()` / `csv_to_cues()` (stdlib `csv`). Columns `sequence,scene,targets,note`; header required, order-free, unknown columns ignored; targets are `;`-separated `POSITION:CUE` pairs split on the **last** colon (labels may contain spaces). Import returns row-numbered errors and no cues on any error. Endpoints decode with `utf-8-sig` (Excel BOM). The editor's Import/Export CSV buttons call these endpoints so the dialect has a single implementation; `showfiles/example.csv` is the generated twin of `example.json`.
 
 ### Health monitoring
 
-Server pings each position every 1s. Position echoes `pong` with the timestamp. Server computes round-trip latency: >1s = yellow, >3s = red, 3 missed pongs = red. The caller sees per-position health in Settings; positions see their own health dot in the bottom bezel.
+Server pings each position every 1s. Position echoes `pong` with the timestamp, which resets the missed-pong counter; 3 consecutive missed pongs = red. Server computes round-trip latency: >1s = yellow, >3s = red. When a position's health **tier** changes, the server pushes a `full_state` to the caller on its own (latency-only changes don't push). The caller sees per-position health in Settings; positions see their own health dot in the bottom bezel.
 
 ## Conventions
 
@@ -149,10 +172,11 @@ Server pings each position every 1s. Position echoes `pong` with the timestamp. 
 - **Frontend:** Vanilla JS in IIFEs, no modules/imports/bundler. Each page has its own `.js` file. CSS uses custom properties defined in `common.css`. Class toggling (`.classList.add/remove/toggle`) for state changes, not inline styles.
 - **State serialization:** All model classes have `to_dict()` methods. The server sends dicts over WebSocket, never raw dataclass instances.
 - **Async locking:** All `StateManager` mutation methods use `async with self._lock:`. Private helpers like `_advance_cue()` and `_arm_current_cue()` are called inside an already-held lock — they must never acquire it themselves.
-- **Mobile-first concerns:** The app runs over HTTP on LAN. Never use APIs that require secure context (HTTPS). Touch events need explicit handling alongside mouse events (see lock button). Use `100dvh` not `100vh` for mobile viewport.
+- **Mobile-first concerns:** The app runs over HTTP on LAN. Never use APIs that require secure context (HTTPS) — this is why screen keep-awake uses the NoSleep technique (`static/js/keepawake.js`: hidden muted looping `static/keepawake.mp4`, started on first tap) instead of the Wake Lock API. Touch events need explicit handling alongside mouse events (see lock button). Use `100dvh` not `100vh` for mobile viewport. The position console's DIM button (off → dim → red) is a pure-frontend `pointer-events: none` overlay above everything (z-index 150 > lock's 100), persisted in `localStorage` — taps always pass through.
+- **mDNS:** `main.py` advertises `cuelight.local` via `zeroconf` at startup (`_start_mdns()`, best-effort in a daemon thread — registration probes the network for seconds and must never block the event loop; any failure silently falls back to IP/QR). `/api/info` reports `mdns_host` ("" when inactive); the caller UI shows the name in Settings → Network and on the join-info screen. The ServiceInfo port is the default 8000 — the A-record (name → IP) is what matters for typed URLs.
 
 ## Testing
 
 Tests are in `tests/test_cuelight.py`. They test via real WebSocket connections to a running server (integration tests, not mocks). The test harness starts a uvicorn server on port 8001 in a background thread, runs async test methods using `asyncio.run()`, and tears down after. Tests use the `websockets` library to connect as caller/positions and assert on the JSON messages received.
 
-Always clean `state/snapshot.json` before test runs to avoid state leakage.
+Always clean `state/snapshot.json` (plus `snapshot.bak`, `showlog.jsonl`, `showlog.bak`) before test runs to avoid state leakage — the suite's `_clean_state()` does this in setUp/tearDown of the module.

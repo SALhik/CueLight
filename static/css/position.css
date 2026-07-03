@@ -90,7 +90,7 @@ body {
 .bezel-left { display: flex; align-items: center; gap: 8px; }
 .bezel-right { display: flex; align-items: center; gap: 8px; }
 
-.btn-reset {
+.btn-reset, .btn-dim {
   background: var(--border);
   color: var(--text);
   padding: 8px 16px;
@@ -143,3 +143,35 @@ body {
 }
 
 .lock-overlay.visible { display: flex; }
+
+/* Flash roll call: below the lock overlay so LOCK always wins */
+.flash-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--yellow-bright);
+  color: #111;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 90;
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  animation: flash 0.6s ease-in-out infinite;
+}
+
+.flash-overlay.visible { display: flex; }
+
+/* Running-mode dimming: sits above everything (total light output is what
+   matters backstage) but never blocks taps — pointer-events pass through. */
+.dim-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  z-index: 150;
+}
+
+.dim-overlay.dim { display: block; background: rgba(0, 0, 0, 0.8); }
+/* Red-tinted variant: dark with a red cast to preserve night vision */
+.dim-overlay.red { display: block; background: rgba(70, 0, 0, 0.82); }

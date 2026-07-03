@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CueLight — Observer</title>
+  <link rel="stylesheet" href="/static/css/common.css">
+  <link rel="stylesheet" href="/static/css/caller.css">
+  <link rel="stylesheet" href="/static/css/observer.css">
+</head>
+<body>
+  <!-- Portrait warning -->
+  <div class="portrait-overlay" id="portraitOverlay">Please rotate to landscape.</div>
+
+  <!-- Observer status bar -->
+  <div class="observer-bar">
+    <span class="observer-tag">OBSERVER</span>
+    <span class="caller-status" id="callerStatus">Connecting…</span>
+    <span class="lock-tag" id="lockTag" style="display:none">LOCKED</span>
+    <button class="take-over-btn" id="takeOverBtn" style="display:none">TAKE OVER AS CALLER</button>
+  </div>
+
+  <!-- Warning banner for missing positions -->
+  <div class="warning-banner" id="warningBanner"></div>
+
+  <!-- Main grid (read-only) -->
+  <div class="grid-area">
+    <div class="positions-grid" id="positionsGrid"></div>
+  </div>
+
+  <!-- Showfile transport (display only) -->
+  <div class="transport-row" id="transportRow">
+    <div class="cue-display">
+      <span class="scene-label" id="transportScene"></span>
+      <span class="cue-label" id="transportCue"></span>
+      <div class="transport-note" id="transportNote"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/keepawake.js"></script>
+  <script src="/static/js/observer.js"></script>
+</body>
+</html>

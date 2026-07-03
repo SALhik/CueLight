@@ -51,6 +51,8 @@ class Position:
     osc_fire_result: OscFireResult = OscFireResult.NONE
     osc_trust: str = "none"
     color: str = ""
+    # Roll-call state: "none" | "pending" | "confirmed". Transient — not restored from snapshot.
+    flash: str = "none"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,7 @@ class Position:
             "osc_fire_result": self.osc_fire_result.value,
             "osc_trust": self.osc_trust,
             "color": self.color,
+            "flash": self.flash,
         }
 
 
@@ -161,8 +164,10 @@ class AppState:
     password_enabled: bool = False
     password: str = ""
     showfile: Showfile | None = None
+    showfile_filename: str = ""
     current_cue_index: int = 0
     paused: bool = False
+    auto_standby: bool = False
     osc_patch_filename: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -174,7 +179,9 @@ class AppState:
             "password_enabled": self.password_enabled,
             "password": self.password,
             "showfile": self.showfile.to_dict() if self.showfile else None,
+            "showfile_filename": self.showfile_filename,
             "current_cue_index": self.current_cue_index,
             "paused": self.paused,
+            "auto_standby": self.auto_standby,
             "osc_patch_filename": self.osc_patch_filename,
         }

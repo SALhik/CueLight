@@ -1,0 +1,58 @@
+/* Observer page: reuses caller.css for the grid, read-only on top of it. */
+
+.observer-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  min-height: 48px;
+}
+
+.observer-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--osc-accent);
+  border: 1px solid var(--osc-accent);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.caller-status {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green-bright);
+}
+
+.caller-status.off {
+  color: var(--red-bright);
+  animation: flash 1s ease-in-out infinite;
+}
+
+.lock-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--yellow-bright);
+  border: 1px solid var(--yellow-bright);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.take-over-btn {
+  margin-left: auto;
+  background: var(--red-dim);
+  color: var(--red-bright);
+  border: 1px solid var(--red-bright);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* The grid is a mirror, not a control surface */
+.position-col .col-btn,
+.position-col .col-header {
+  pointer-events: none;
+  cursor: default;
+}

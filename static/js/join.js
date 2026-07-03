@@ -78,6 +78,24 @@
     location.href = "/";
   });
 
+  document.getElementById("observerLink").addEventListener("click", async () => {
+    const pw = pwFromQR || document.getElementById("passwordInput").value.trim();
+    if (needsPassword) {
+      const res = await fetch("/api/check_password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      const result = await res.json();
+      if (!result.ok) {
+        showError("Incorrect password.");
+        return;
+      }
+    }
+    localStorage.setItem("cuelight_observer_pw", pw);
+    location.href = "/observer";
+  });
+
   function showError(msg) {
     const el = document.getElementById("errorMsg");
     el.textContent = msg;

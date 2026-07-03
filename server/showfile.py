@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .files import require_safe_filename
 from .models import Cue, CueTarget, Showfile
 
 SHOWFILES_DIR = Path(__file__).resolve().parent.parent / "showfiles"
@@ -15,6 +16,7 @@ def list_showfiles() -> list[str]:
 
 
 def load_showfile(filename: str) -> Showfile:
+    require_safe_filename(filename)
     path = SHOWFILES_DIR / filename
     if not path.exists():
         raise FileNotFoundError(f"Showfile not found: {filename}")
@@ -51,6 +53,7 @@ def validate_showfile(data: dict[str, Any]) -> list[str]:
 
 
 def save_showfile(filename: str, data: dict[str, Any]) -> None:
+    require_safe_filename(filename)
     SHOWFILES_DIR.mkdir(parents=True, exist_ok=True)
     path = SHOWFILES_DIR / filename
     path.write_text(json.dumps(data, indent=2))
