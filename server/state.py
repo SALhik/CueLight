@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from datetime import datetime
 from typing import Any
 
 from fastapi import WebSocket
@@ -25,6 +26,13 @@ COLOR_PALETTE = [
     "#64748b",  # Slate
     "#d946ef",  # Fuchsia
 ]
+
+
+PROBLEM_MESSAGE_MAX = 60
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 
 class StateManager:
@@ -202,6 +210,7 @@ class StateManager:
             if not pos or self.state.locked:
                 return
             self._clear_transient_osc_results()
+            self.state.last_go_time = _now_iso()
             if pos.type == PositionType.OSC:
                 pos.standby = ButtonState.IDLE
                 pos.armed = False
@@ -263,6 +272,7 @@ class StateManager:
                 return
             self._clear_transient_osc_results()
             self.log.record("master_go", cue=self._current_cue_seq())
+            self.state.last_go_time = _now_iso()
             fire_jobs: list[tuple[str, OscDevice, str]] = []
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
@@ -366,6 +376,57 @@ class StateManager:
             for pos in self.state.positions.values():
                 pos.flash = "none"
             self._persist()
+            await self._notify_caller_full_state()
+
+    # --- Problem signal (position → caller) ---
+
+    async def raise_problem(self, client_id: str, message: str = "") -> None:
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if not pos or pos.type == PositionType.OSC:
+                return
+            pos.problem = True
+            pos.problem_message = message.strip()[:PROBLEM_MESSAGE_MAX]
+            self.log.record("problem_raised", position=pos.label,
+                            cue=self._current_cue_seq(), detail=pos.problem_message)
+            self._persist()
+            await self._send_position(client_id, {
+                "type": "problem_changed",
+                "problem": True,
+                "message": pos.problem_message,
+            })
+            await self._notify_caller_full_state()
+
+    async def clear_problem(self, client_id: str, by_caller: bool = False) -> None:
+        async with self._lock:
+            pos = self.state.positions.get(client_id)
+            if not pos or not pos.problem:
+                return
+            pos.problem = False
+            pos.problem_message = ""
+            self.log.record("problem_cleared", position=pos.label,
+                            cue=self._current_cue_seq(),
+                            detail="by caller" if by_caller else "by operator")
+            self._persist()
+            await self._send_position(client_id, {
+                "type": "problem_changed",
+                "problem": False,
+                "message": "",
+            })
+            await self._notify_caller_full_state()
+
+    # --- Show timer ---
+
+    async def start_show(self) -> None:
+        async with self._lock:
+            restarted = bool(self.state.show_start_time)
+            self.state.show_start_time = _now_iso()
+            self.log.record("show_started", detail="restart" if restarted else "")
+            self._persist()
+            await self._broadcast_positions({
+                "type": "show_started",
+                "start_time": self.state.show_start_time,
+            })
             await self._notify_caller_full_state()
 
     # --- Arm / disarm ---
@@ -938,6 +999,8 @@ class StateManager:
             "password_enabled": self.state.password_enabled,
             "password": self.state.password,
             "osc_patch_filename": self.state.osc_patch_filename,
+            "show_start_time": self.state.show_start_time,
+            "last_go_time": self.state.last_go_time,
         }
 
     def get_full_state_for_observer(self) -> dict[str, Any]:

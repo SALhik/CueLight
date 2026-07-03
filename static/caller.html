@@ -51,6 +51,8 @@
     <button id="resetAllBtn">RESET ALL</button>
     <button id="exitBtn">EXIT</button>
     <button id="settingsBtn">SETTINGS</button>
+    <button id="startShowBtn">START SHOW</button>
+    <span class="show-timer" id="showTimer"></span>
     <span class="spacer"></span>
     <button class="join-toggle" id="showJoinInfo">Show join info</button>
     <button class="join-toggle" id="hideJoinInfo" style="display:none">Hide join info</button>
@@ -108,10 +110,28 @@
         <label id="networkInfo">Loading…</label>
       </div>
 
+      <h3>Show Timer</h3>
+      <div class="field">
+        <label>Show time since show start</label>
+        <input type="checkbox" id="timerElapsedToggle">
+      </div>
+      <div class="field">
+        <label>Show time since last GO</label>
+        <input type="checkbox" id="timerSinceGoToggle">
+      </div>
+      <div class="field">
+        <label>Show clock time</label>
+        <input type="checkbox" id="timerClockToggle">
+      </div>
+
       <h3>Show Log</h3>
       <div class="field">
         <button class="modal-btn" id="downloadLogBtn">Download CSV</button>
         <button class="modal-btn" id="viewLogBtn">View JSON</button>
+      </div>
+      <div class="field">
+        <button class="modal-btn" id="showReportBtn">Show report</button>
+        <button class="modal-btn" id="showReportCsvBtn">Report CSV</button>
       </div>
 
       <div id="resumeSection" style="display:none">
@@ -155,6 +175,16 @@
         <button class="modal-btn" id="renameSaveBtn" style="flex:1">Rename</button>
         <button class="modal-btn" id="removePositionBtn" style="flex:1;background:var(--red-dim);color:var(--red-bright)">Remove</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Problem readout modal -->
+  <div class="modal-overlay" id="problemModal">
+    <div class="modal">
+      <button class="close-btn" id="closeProblem">✕</button>
+      <h2 id="problemTitle">Problem</h2>
+      <div class="problem-message" id="problemMessage"></div>
+      <button class="modal-btn problem-clear-btn" id="problemClearCallerBtn">Clear problem</button>
     </div>
   </div>
 

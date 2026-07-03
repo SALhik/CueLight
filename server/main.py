@@ -314,6 +314,20 @@ async def api_showlog(format: str = "json"):
     return {"entries": manager.log.entries}
 
 
+@app.get("/api/showreport")
+async def api_showreport(format: str = "html"):
+    """Post-show report computed on demand from the show log; nothing is
+    stored server-side. Exposed like /api/showlog (no password gate)."""
+    from .showreport import report_csv, report_html
+    if format == "csv":
+        return Response(
+            report_csv(manager.log.entries),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="showreport.csv"'},
+        )
+    return HTMLResponse(report_html(manager.log.entries))
+
+
 # --- Test support ---
 
 @app.post("/api/_test_reset")

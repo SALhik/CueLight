@@ -91,6 +91,12 @@ async def _handle_caller_message(ws: WebSocket, manager: StateManager, msg: dict
     elif msg_type == "clear_flash":
         await manager.clear_flash()
 
+    elif msg_type == "clear_problem":
+        await manager.clear_problem(msg["client_id"], by_caller=True)
+
+    elif msg_type == "start_show":
+        await manager.start_show()
+
     elif msg_type == "toggle_arm":
         await manager.toggle_arm(msg["client_id"])
 
@@ -205,6 +211,8 @@ async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
         "locked": manager.state.locked,
         "caller_connected": manager.state.caller_connected,
         "color": pos.color if pos else "",
+        "problem": pos.problem if pos else False,
+        "problem_message": pos.problem_message if pos else "",
     }
     sf = manager.state.showfile
     if sf and pos:
@@ -289,6 +297,12 @@ async def _handle_position_message(
 
     elif msg_type == "ack_flash":
         await manager.ack_flash(client_id)
+
+    elif msg_type == "raise_problem":
+        await manager.raise_problem(client_id, str(msg.get("message", "")))
+
+    elif msg_type == "clear_problem":
+        await manager.clear_problem(client_id, by_caller=False)
 
     elif msg_type == "rename":
         await manager.rename_position(client_id, msg["label"])

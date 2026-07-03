@@ -16,10 +16,23 @@ This document walks through every feature and how to use it.
 
 ### Starting the server
 
+**The easy way (no terminal knowledge needed):** double-click or run the
+bootstrap script in the project folder — `run.sh` on macOS/Linux
+(`./run.sh` from a terminal), `run.bat` on Windows. On first run it creates a
+private Python environment and installs everything; after that it just starts
+the server and prints the addresses to open on each device. Keep the window
+open for the whole show.
+
+**The manual way:**
+
 ```bash
 pip install -r requirements.txt
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+python -m server
 ```
+
+`python -m server` starts the server on port 8000 and prints the join URLs
+(LAN IP and `cuelight.local`). The equivalent raw command is
+`uvicorn server.main:app --host 0.0.0.0 --port 8000`.
 
 The server listens on all interfaces on port 8000. Find the host machine's LAN
 IP (Settings shows it, or `/api/info` returns it) and share
@@ -146,6 +159,42 @@ watches the confirmations tick in live (see *Settings → Health & Latency*).
 An incoming standby or GO dismisses the overlay automatically, so a real cue
 can never be blocked by it.
 
+### Sound & vibration alerts (opt-in)
+
+An operator watching the stage can miss a silent light change. The **ALERT**
+button in the bottom bezel turns on audible/tactile alerts for incoming cues:
+
+- **Standby** — two short high beeps (and a double vibration pulse on
+  Android).
+- **GO** — one long lower beep (and a long vibration).
+
+The patterns are distinct so you can tell them apart without looking. Off by
+default, per device, and the choice survives page reloads. Turning it on plays
+a small confirmation blip — that first tap also unlocks the phone's audio, so
+alerts work from then on. (iPhones can't vibrate from the browser; the beep is
+the alert there.)
+
+### Raising a PROBLEM
+
+Operators can signal the caller that something is wrong — without leaving
+their post or typing in the dark:
+
+1. Tap **PROBLEM** in the bottom bezel. A panel opens *below* the cue buttons
+   (they stay visible and tappable — an incoming standby or GO also closes the
+   panel automatically, so a cue can never be blocked by it).
+2. Tap one of the big preset messages — **NOT READY**, **PROP ISSUE**,
+   **NEED SM** — or type a short message (60 characters max) and tap
+   **RAISE**. A preset is one tap; typing is optional.
+3. The PROBLEM button turns orange while the flag is up. Re-raising replaces
+   the message; **CLEAR PROBLEM** (in the panel) withdraws it.
+
+On the Caller grid the position's column gets a **solid orange ⚠ PROBLEM
+badge and outline** — deliberately steady, not flashing, so it never disturbs
+the calling rhythm mid-sequence. The caller taps the badge to read the message
+and can clear it from there. The flag survives reconnects and even a server
+restart, and every raise/clear is recorded in the show log with its message.
+Observers see the flag (and message) too.
+
 ### Screen dimming (running mode)
 
 Backstage must be dark, and a phone at normal brightness glows like a lantern.
@@ -249,6 +298,35 @@ and show log. Operators just reload their phones (or wait for auto-reconnect)
 and land back in their seats. Starting a *new* show after an EXIT overwrites the
 backup at the next EXIT.
 
+### START SHOW and the show timer
+
+At the top of show, press **START SHOW** in the bottom bar (a confirmation
+guards against mis-taps). This records the wall-clock start time, notes it in
+the show log, and shows every connected operator a brief "SHOW STARTED"
+banner that dismisses itself after a few seconds — it floats over the header
+strip, never the cue buttons. Pressing START SHOW again simply re-records the
+time (with another confirmation and a log entry), for a false start or a
+per-act reset. The start time survives a mid-show server restart; EXIT clears
+it.
+
+Next to the button, a **compact timer** shows — in quiet grey text that never
+competes with cue state — any combination of:
+
+- time since show start (`SHOW 1:23:45`),
+- time since the last GO (`GO +02:10`),
+- the current clock time.
+
+Pick which in **Settings → Show Timer** (first two on by default; the choice
+is per device and persists).
+
+### Problem markers
+
+When an operator raises a **PROBLEM** (see the Position console section), the
+column shows a steady orange **⚠ PROBLEM** badge and outline. Tap the badge to
+read the operator's message and clear the flag. The marker never flashes, so
+it won't be confused with a called standby. If the position also disconnects,
+the DISCONNECTED badge takes over but the orange outline remains.
+
 ### Settings
 
 The **SETTINGS** button opens a modal with these sections:
@@ -268,10 +346,14 @@ The **SETTINGS** button opens a modal with these sections:
    the editor's Patches tab. See *OSC outbound*.
 4. **Network** — the server host/address to share with operators, including the
    `cuelight.local` mDNS name when it's active.
-5. **Show Log** — download the show's event log as CSV, or view the raw JSON
-   (see *Show log*).
-6. **Previous Show** — appears only when an EXIT backup exists; resumes it.
-7. **Security** — the password toggle and field (see *Password protection*).
+5. **Show Timer** — checkboxes choosing what the bottom-bar timer displays:
+   time since show start, time since last GO, clock time (see *START SHOW and
+   the show timer*). Per-device, persisted.
+6. **Show Log** — download the show's event log as CSV, view the raw JSON, or
+   generate the **post-show report** (HTML page or CSV — see *Show log &
+   post-show report*).
+7. **Previous Show** — appears only when an EXIT backup exists; resumes it.
+8. **Security** — the password toggle and field (see *Password protection*).
 
 ### Join info / QR code
 
@@ -665,12 +747,13 @@ is designed for an iPad in landscape (a rotate prompt appears in portrait).
 
 ---
 
-## Show log
+## Show log & post-show report
 
 The server keeps a timestamped log of everything that happens in the show:
 standbys and acks (with the operator and the cue they happened on), GOs, master
 actions, cue advances and jumps, OSC fire results, lock/unlock, pauses,
-positions joining/leaving, showfile/patch loads, and flash-check confirmations.
+positions joining/leaving, showfile/patch loads, flash-check confirmations,
+problems raised/cleared (with their messages), and START SHOW presses.
 Auto-called standbys are marked `auto` so a report distinguishes them from
 manual calls.
 
@@ -685,6 +768,24 @@ manual calls.
 
 It doubles as a debugging trail: if a cue was missed, the log shows exactly
 when the standby went out and when (or whether) it was acknowledged.
+
+### Post-show report
+
+After (or during) a show, **Settings → Show Log → Show report** turns the log
+into a readable report — computed on demand from the log, with nothing extra
+stored on the server:
+
+- **Standby response times** per position (min / average / max) and per cue —
+  how quickly each operator acknowledged their standbys.
+- **Standbys never acknowledged** — standbys that were still un-acked when the
+  GO fired (or when the show ended).
+- **Time between GOs** — the pace of the show, cue by cue.
+- **Auto vs manual standby counts**, **joins/disconnects per position**, and
+  every **problem raised** with its message and how it was cleared.
+
+The report is a self-contained HTML page (`GET /api/showreport`) you can save
+or print, and **Report CSV** (`?format=csv`) downloads the same numbers as a
+flat spreadsheet-friendly CSV.
 
 ---
 
@@ -765,6 +866,7 @@ useful for integration or debugging.
 | `GET /api/patch/{filename}` | Fetch a patch's JSON |
 | `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) |
 | `GET /api/showlog` | Show event log as JSON (`?format=csv` for CSV download) |
+| `GET /api/showreport` | Post-show report as a self-contained HTML page (`?format=csv` for CSV) |
 | `GET /api/backup_info` | Whether an EXIT backup exists (plus showfile/position count) |
 | `POST /api/resume_show` | Restore the EXIT backup into the running server |
 | `GET /api/qr?password=…` | PNG QR code for the join URL |
@@ -785,8 +887,11 @@ useful for integration or debugging.
    and connect. A director or backup caller can pick **Watch as Observer** on
    the join page instead.
 6. Before the house opens, run a **flash check** (Settings → Health & Latency →
-   Flash all positions) and watch every operator confirm.
-7. Run the show:
+   Flash all positions) and watch every operator confirm. Operators who want
+   audible cues turn on **ALERT** in their bezel.
+7. At the top of show, press **START SHOW** — the clock starts and every
+   operator sees a brief notice.
+8. Run the show:
    - **Manual:** use each column's STANDBY / GO, or arm positions with PRESET and
      drive them together with the MASTER buttons.
    - **Showfile:** PRESET arming is automatic (including OSC positions); tap
@@ -794,6 +899,8 @@ useful for integration or debugging.
      use PREV / JUMP / PAUSE as needed.
    - **OSC:** STANDBY on an OSC column probes the device; GO fires the OSC
      message. Results (SENT / NO REPLY) show on the button for 2 seconds.
-8. **LOCK** during holds; **RESET ALL** between acts.
-9. **EXIT** to end the show. Afterwards, download the show log from Settings,
-   or **RESUME SHOW** if the EXIT was a mistake.
+9. **LOCK** during holds; **RESET ALL** between acts. Operators flag trouble
+   with **PROBLEM**; the caller reads and clears the orange badges.
+10. **EXIT** to end the show. Afterwards, download the show log or generate
+    the **post-show report** from Settings, or **RESUME SHOW** if the EXIT
+    was a mistake.

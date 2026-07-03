@@ -19,6 +19,9 @@
   --grey: #555;
   --osc-accent: #2a6a8a;
   --osc-accent-dim: #1a3a4a;
+  /* Problem signal: orange — distinct from standby red, go green, preset yellow */
+  --orange-dim: #4a2a10;
+  --orange-bright: #ff9500;
 }
 
 html, body {

@@ -38,10 +38,13 @@
     password: "",
     osc_patch_filename: "",
     auto_standby: false,
+    show_start_time: "",
+    last_go_time: "",
   };
   let reconnectDelay = 500;
   let lockHoldTimer = null;
   let renamingClientId = null;
+  let problemClientId = null;
   let oscResultTimers = {};
   let exited = false;
 
@@ -105,6 +108,8 @@
         state.password = msg.password || "";
         state.osc_patch_filename = msg.osc_patch_filename || "";
         state.auto_standby = !!msg.auto_standby;
+        state.show_start_time = msg.show_start_time || "";
+        state.last_go_time = msg.last_go_time || "";
         render();
         break;
 
@@ -138,6 +143,7 @@
     renderTransport();
     renderWarnings();
     renderLock();
+    renderTimer();
     // Keep the roll-call/health list live while Settings is open
     if (document.getElementById("settingsModal").classList.contains("visible")) {
       renderHealthList();
@@ -156,6 +162,7 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
+      if (pos.problem) col.classList.add("problem");
       col.dataset.clientId = cid;
 
       // Header
@@ -166,6 +173,8 @@
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
+      } else if (pos.problem) {
+        badgeHtml = '<div class="col-badge problem-badge">⚠ PROBLEM</div>';
       } else {
         badgeHtml = '<div class="col-badge"></div>';
       }
@@ -186,6 +195,13 @@
       header.addEventListener("click", function () {
         openRename(cid, pos.label);
       });
+      var problemBadge = header.querySelector(".problem-badge");
+      if (problemBadge) {
+        problemBadge.addEventListener("click", function (e) {
+          e.stopPropagation();
+          openProblem(cid);
+        });
+      }
       col.appendChild(header);
 
       // Standby
@@ -449,6 +465,76 @@
     if (e.key === "Enter") document.getElementById("renameSaveBtn").click();
   });
 
+  // --- Problem readout ---
+  function openProblem(clientId) {
+    problemClientId = clientId;
+    var pos = state.positions[clientId];
+    if (!pos) return;
+    document.getElementById("problemTitle").textContent = pos.label + " — PROBLEM";
+    document.getElementById("problemMessage").textContent =
+      pos.problem_message || "(no message)";
+    document.getElementById("problemModal").classList.add("visible");
+  }
+
+  document.getElementById("problemClearCallerBtn").addEventListener("click", () => {
+    if (problemClientId) {
+      send({ type: "clear_problem", client_id: problemClientId });
+    }
+    closeModal("problemModal");
+  });
+
+  // --- Show timer + START SHOW ---
+  const showTimer = document.getElementById("showTimer");
+  const TIMER_PREFS_KEY = "cuelight_timer_prefs";
+  let timerPrefs = { elapsed: true, sinceGo: true, clock: false };
+  try {
+    var storedPrefs = JSON.parse(localStorage.getItem(TIMER_PREFS_KEY) || "{}");
+    ["elapsed", "sinceGo", "clock"].forEach(function (k) {
+      if (typeof storedPrefs[k] === "boolean") timerPrefs[k] = storedPrefs[k];
+    });
+  } catch (e) {}
+
+  function saveTimerPrefs() {
+    localStorage.setItem(TIMER_PREFS_KEY, JSON.stringify(timerPrefs));
+  }
+
+  function fmtDuration(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    function pad(n) { return (n < 10 ? "0" : "") + n; }
+    return h > 0 ? h + ":" + pad(m) + ":" + pad(sec) : pad(m) + ":" + pad(sec);
+  }
+
+  function renderTimer() {
+    var parts = [];
+    var now = Date.now();
+    if (timerPrefs.elapsed && state.show_start_time) {
+      var start = Date.parse(state.show_start_time);
+      if (!isNaN(start)) parts.push("SHOW " + fmtDuration(now - start));
+    }
+    if (timerPrefs.sinceGo && state.last_go_time) {
+      var lastGo = Date.parse(state.last_go_time);
+      if (!isNaN(lastGo)) parts.push("GO +" + fmtDuration(now - lastGo));
+    }
+    if (timerPrefs.clock) {
+      var d = new Date();
+      function pad2(n) { return (n < 10 ? "0" : "") + n; }
+      parts.push(pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds()));
+    }
+    showTimer.textContent = parts.join(" · ");
+  }
+
+  setInterval(renderTimer, 1000);
+
+  document.getElementById("startShowBtn").addEventListener("click", () => {
+    const prompt = state.show_start_time
+      ? "Restart the show clock? The start time will be re-recorded."
+      : "Start the show clock? All positions get a brief notice.";
+    if (confirm(prompt)) send({ type: "start_show" });
+  });
+
   // --- Settings modal ---
   document.getElementById("settingsBtn").addEventListener("click", async () => {
     await populateSettings();
@@ -545,6 +631,11 @@
       }
     } catch (e) {}
 
+    // Timer display preferences (local to this device)
+    document.getElementById("timerElapsedToggle").checked = timerPrefs.elapsed;
+    document.getElementById("timerSinceGoToggle").checked = timerPrefs.sinceGo;
+    document.getElementById("timerClockToggle").checked = timerPrefs.clock;
+
     // Password
     document.getElementById("pwToggle").checked = state.password_enabled;
     document.getElementById("pwValueField").style.display = state.password_enabled ? "flex" : "none";
@@ -615,6 +706,33 @@
     window.open("/api/showlog");
   });
 
+  document.getElementById("showReportBtn").addEventListener("click", () => {
+    window.open("/api/showreport");
+  });
+
+  document.getElementById("showReportCsvBtn").addEventListener("click", () => {
+    window.open("/api/showreport?format=csv");
+  });
+
+  // --- Timer display preferences ---
+  document.getElementById("timerElapsedToggle").addEventListener("change", (e) => {
+    timerPrefs.elapsed = e.target.checked;
+    saveTimerPrefs();
+    renderTimer();
+  });
+
+  document.getElementById("timerSinceGoToggle").addEventListener("change", (e) => {
+    timerPrefs.sinceGo = e.target.checked;
+    saveTimerPrefs();
+    renderTimer();
+  });
+
+  document.getElementById("timerClockToggle").addEventListener("change", (e) => {
+    timerPrefs.clock = e.target.checked;
+    saveTimerPrefs();
+    renderTimer();
+  });
+
   document.getElementById("pwToggle").addEventListener("change", (e) => {
     const enabled = e.target.checked;
     document.getElementById("pwValueField").style.display = enabled ? "flex" : "none";
@@ -673,6 +791,7 @@
   document.getElementById("closeSettings").addEventListener("click", () => closeModal("settingsModal"));
   document.getElementById("closeJump").addEventListener("click", () => closeModal("jumpModal"));
   document.getElementById("closeRename").addEventListener("click", () => closeModal("renameModal"));
+  document.getElementById("closeProblem").addEventListener("click", () => closeModal("problemModal"));
 
   // Close modals on overlay click
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {

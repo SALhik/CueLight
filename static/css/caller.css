@@ -124,6 +124,29 @@ body {
   color: var(--osc-accent);
 }
 
+/* Problem signal: solid (NON-flashing — must not disturb the calling rhythm)
+   orange badge + column outline; tap the badge to read the message. */
+.position-col .col-header .col-badge.problem-badge {
+  color: #111;
+  background: var(--orange-bright);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.position-col.problem {
+  box-shadow: inset 0 0 0 2px var(--orange-bright);
+  border-radius: 4px;
+}
+
+/* Observer-only: the short problem message shown under the header */
+.position-col .problem-msg {
+  font-size: 10px;
+  color: var(--orange-bright);
+  text-align: center;
+  padding: 2px 4px;
+  word-break: break-word;
+}
+
 .position-col .col-btn {
   flex: 1;
   display: flex;
@@ -312,6 +335,16 @@ body {
 
 .bottom-bar .spacer { flex: 1; }
 
+/* Show timer: deliberately quiet — dim monospace text, no color accents,
+   so it never competes with cue state. */
+.bottom-bar .show-timer {
+  color: var(--text-dim);
+  font-family: monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
 .bottom-bar .join-toggle {
   background: none;
   color: var(--text-dim);
@@ -403,6 +436,22 @@ body {
   color: var(--text-dim);
   font-size: 20px;
   cursor: pointer;
+}
+
+/* Problem readout modal */
+.modal .problem-message {
+  background: var(--bg);
+  border: 1px solid var(--orange-bright);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 16px;
+  margin-bottom: 12px;
+  word-break: break-word;
+}
+
+.modal .problem-clear-btn {
+  background: var(--orange-bright);
+  color: #111;
 }
 
 /* Jump-to-cue modal */

@@ -53,6 +53,9 @@ class Position:
     color: str = ""
     # Roll-call state: "none" | "pending" | "confirmed". Transient — not restored from snapshot.
     flash: str = "none"
+    # Operator-raised problem flag; survives reconnects and restarts (persisted).
+    problem: bool = False
+    problem_message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +74,8 @@ class Position:
             "osc_trust": self.osc_trust,
             "color": self.color,
             "flash": self.flash,
+            "problem": self.problem,
+            "problem_message": self.problem_message,
         }
 
 
@@ -169,6 +174,9 @@ class AppState:
     paused: bool = False
     auto_standby: bool = False
     osc_patch_filename: str = ""
+    # ISO timestamps; "" until START SHOW / the first GO. Cleared by EXIT.
+    show_start_time: str = ""
+    last_go_time: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,4 +192,6 @@ class AppState:
             "paused": self.paused,
             "auto_standby": self.auto_standby,
             "osc_patch_filename": self.osc_patch_filename,
+            "show_start_time": self.show_start_time,
+            "last_go_time": self.last_go_time,
         }
