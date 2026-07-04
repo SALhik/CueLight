@@ -98,6 +98,11 @@ body {
   font-size: 12px;
 }
 
+.btn-dim.active {
+  background: var(--green-dim);
+  color: var(--green-bright);
+}
+
 .label-display {
   font-weight: 700;
   font-size: 14px;
@@ -116,6 +121,96 @@ body {
 
 .health-dot.yellow { background: var(--yellow-bright); }
 .health-dot.red { background: var(--red-bright); }
+
+/* Problem panel: in the layout flow (between the cue buttons and the bezel),
+   so opening it compresses STANDBY/GO but never covers them. Big touch
+   targets for a dark wing. */
+.problem-panel {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface);
+  border-top: 2px solid var(--orange-bright);
+}
+
+.problem-panel.visible { display: flex; }
+
+.problem-row { display: flex; gap: 8px; }
+
+.problem-preset {
+  flex: 1;
+  padding: 20px 8px;
+  font-size: 15px;
+  border-radius: 8px;
+  background: var(--orange-dim);
+  color: var(--orange-bright);
+}
+
+.problem-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 15px;
+}
+
+.problem-raise {
+  padding: 12px 20px;
+  border-radius: 8px;
+  background: var(--orange-bright);
+  color: #111;
+  font-size: 15px;
+}
+
+.problem-clear {
+  display: none;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--border);
+  color: var(--orange-bright);
+  font-size: 15px;
+}
+
+.problem-panel.active .problem-clear { display: block; }
+
+.btn-problem {
+  background: var(--orange-dim);
+  color: var(--orange-bright);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.btn-problem.active {
+  background: var(--orange-bright);
+  color: #111;
+}
+
+/* Transient "show started" notice: floats over the header strip only,
+   never the cue buttons; taps pass through. */
+.show-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--green-dim);
+  color: var(--green-bright);
+  border: 1px solid var(--green-bright);
+  padding: 10px 28px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  z-index: 80;
+  pointer-events: none;
+  display: none;
+}
+
+.show-banner.visible { display: block; }
 
 .caller-warning {
   background: var(--red-dim);

@@ -3,11 +3,11 @@ from __future__ import annotations
 import csv
 import io
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .persistence import STATE_DIR
+from .timeutil import now_iso
 
 SHOWLOG_PATH = STATE_DIR / "showlog.jsonl"
 SHOWLOG_BACKUP_PATH = STATE_DIR / "showlog.bak"
@@ -29,7 +29,7 @@ class ShowLog:
 
     def record(self, event: str, position: str = "", cue: str = "", detail: str = "") -> None:
         entry = {
-            "time": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+            "time": now_iso(),
             "event": event,
             "position": position,
             "cue": cue,

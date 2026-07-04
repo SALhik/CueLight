@@ -2448,5 +2448,324 @@ class TestShowLog(CueLightTestCase):
         asyncio.run(run())
 
 
+class TestProblemSignal(CueLightTestCase):
+    """A position can raise a PROBLEM flag (with an optional short message)
+    that marks its column on the caller grid until cleared."""
+
+    def _get_log(self) -> dict:
+        return json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/showlog", timeout=2).read())
+
+    def test_raise_reaches_caller_and_echoes_to_position(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "PROP ISSUE"}))
+            echo = await recv_type(pws, "problem_changed")
+            self.assertTrue(echo["problem"])
+            self.assertEqual(echo["message"], "PROP ISSUE")
+
+            state = await recv_type(cws, "full_state")
+            self.assertTrue(state["positions"]["p1"]["problem"])
+            self.assertEqual(state["positions"]["p1"]["problem_message"], "PROP ISSUE")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_message_capped_at_60_chars(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "x" * 200}))
+            state = await recv_type(cws, "full_state")
+            self.assertEqual(len(state["positions"]["p1"]["problem_message"]), 60)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_caller_clears_problem(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "NEED SM"}))
+            raised = await recv_type(pws, "problem_changed")
+            self.assertTrue(raised["problem"])
+            await recv_type(cws, "full_state")
+
+            await cws.send(json.dumps({"type": "clear_problem", "client_id": "p1"}))
+            echo = await recv_type(pws, "problem_changed")
+            self.assertFalse(echo["problem"])
+            state = await recv_type(cws, "full_state")
+            self.assertFalse(state["positions"]["p1"]["problem"])
+            self.assertEqual(state["positions"]["p1"]["problem_message"], "")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_operator_cancels_own_problem(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": ""}))
+            await recv_type(cws, "full_state")
+            await pws.send(json.dumps({"type": "clear_problem"}))
+            state = await recv_type(cws, "full_state")
+            self.assertFalse(state["positions"]["p1"]["problem"])
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_problem_survives_reconnect_and_snapshot(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "NOT READY"}))
+            await recv_type(pws, "problem_changed")
+            await pws.close()
+            await asyncio.sleep(0.3)
+
+            # Snapshot persisted the flag
+            data = json.loads(STATE_SNAPSHOT.read_text())
+            self.assertTrue(data["positions"]["p1"]["problem"])
+            self.assertEqual(data["positions"]["p1"]["problem_message"], "NOT READY")
+
+            # Reconnecting with the same client_id keeps the flag
+            pws2, joined = await connect_position("p1", "LX")
+            self.assertTrue(joined["problem"])
+            self.assertEqual(joined["problem_message"], "NOT READY")
+
+            await pws2.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_raise_and_clear_logged_with_message(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "flat broken"}))
+            await recv_type(cws, "full_state")
+            await cws.send(json.dumps({"type": "clear_problem", "client_id": "p1"}))
+            await recv_type(cws, "full_state")
+            await asyncio.sleep(0.2)
+
+            entries = self._get_log()["entries"]
+            raised = next(e for e in entries if e["event"] == "problem_raised")
+            self.assertEqual(raised["position"], "LX")
+            self.assertEqual(raised["detail"], "flat broken")
+            cleared = next(e for e in entries if e["event"] == "problem_cleared")
+            self.assertEqual(cleared["detail"], "by caller")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_observer_sees_problem(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            ows = await connect(f"{WS_URL}/ws/observer")
+            await ows.send(json.dumps({"client_id": "obs1"}))
+            await recv_type(ows, "role_assigned")
+
+            await pws.send(json.dumps({"type": "raise_problem", "message": "NEED SM"}))
+            deadline = time.time() + 2.0
+            seen = None
+            while time.time() < deadline:
+                raw = await asyncio.wait_for(ows.recv(), timeout=deadline - time.time())
+                msg = json.loads(raw)
+                if msg.get("type") == "full_state" and msg["positions"].get("p1", {}).get("problem"):
+                    seen = msg
+                    break
+            self.assertIsNotNone(seen, "observer never saw the problem flag")
+            self.assertEqual(seen["positions"]["p1"]["problem_message"], "NEED SM")
+
+            await ows.close()
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+
+class TestShowReport(CueLightTestCase):
+    """/api/showreport computes a report from the show log on demand."""
+
+    def _get(self, path: str) -> tuple[str, str]:
+        resp = urllib_request.urlopen(f"{HTTP_URL}{path}", timeout=2)
+        return resp.read().decode(), resp.headers.get("Content-Type", "")
+
+    def test_report_html_includes_latency_and_problems(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await asyncio.sleep(0.15)
+            await pws.send(json.dumps({"type": "ack_standby"}))
+            await recv_type(cws, "full_state")
+            await pws.send(json.dumps({"type": "raise_problem", "message": "PROP ISSUE"}))
+            await recv_type(cws, "full_state")
+            await asyncio.sleep(0.2)
+
+            body, ctype = self._get("/api/showreport")
+            self.assertIn("text/html", ctype)
+            self.assertIn("CueLight Show Report", body)
+            self.assertIn("LX", body)
+            self.assertIn("PROP ISSUE", body)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_report_counts_unacked_and_auto_standbys(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            # Standby → GO without an ack = never acknowledged
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await cws.send(json.dumps({"type": "go", "client_id": "p1"}))
+            await recv_type(pws, "go_called")
+            await asyncio.sleep(0.2)
+
+            body, _ = self._get("/api/showreport?format=csv")
+            lines = body.strip().splitlines()
+            self.assertEqual(lines[0].strip(), "section,position,cue,metric,value")
+            self.assertTrue(
+                any(ln.startswith("unacked_standby,LX") for ln in lines),
+                f"no unacked_standby row for LX:\n{body}",
+            )
+            self.assertTrue(
+                any(ln.startswith("standby_counts,,,manual,1") for ln in lines),
+                f"manual standby not counted:\n{body}",
+            )
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_report_go_intervals(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+            await pws.send(json.dumps({"type": "rename", "label": "LX"}))
+
+            await cws.send(json.dumps({"type": "toggle_arm", "client_id": "p1"}))
+            await recv_type(cws, "full_state")
+            await cws.send(json.dumps({"type": "go_armed"}))
+            await recv_type(pws, "go_called")
+            await asyncio.sleep(0.3)
+            await cws.send(json.dumps({"type": "toggle_arm", "client_id": "p1"}))
+            await recv_type(cws, "full_state")
+            await cws.send(json.dumps({"type": "go_armed"}))
+            await recv_type(pws, "go_called")
+            await asyncio.sleep(0.2)
+
+            body, _ = self._get("/api/showreport?format=csv")
+            go_rows = [ln for ln in body.splitlines() if ln.startswith("go_interval,")]
+            self.assertEqual(len(go_rows), 1, f"expected one GO interval:\n{body}")
+            seconds = float(go_rows[0].split(",")[4])
+            self.assertGreater(seconds, 0.1)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+
+class TestShowTimer(CueLightTestCase):
+    """START SHOW records the wall-clock start, notifies positions, persists."""
+
+    def test_start_show_notifies_positions_and_caller(self):
+        async def run():
+            cws, _, state = await connect_caller()
+            self.assertEqual(state["show_start_time"], "")
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "start_show"}))
+            notice = await recv_type(pws, "show_started")
+            self.assertTrue(notice["start_time"])
+
+            state = await recv_type(cws, "full_state")
+            self.assertEqual(state["show_start_time"], notice["start_time"])
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_start_show_persisted_and_restart_rerecords(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            await cws.send(json.dumps({"type": "start_show"}))
+            first = (await recv_type(cws, "full_state"))["show_start_time"]
+            await asyncio.sleep(0.3)
+
+            data = json.loads(STATE_SNAPSHOT.read_text())
+            self.assertEqual(data["show_start_time"], first)
+
+            await asyncio.sleep(0.05)
+            await cws.send(json.dumps({"type": "start_show"}))
+            second = (await recv_type(cws, "full_state"))["show_start_time"]
+            self.assertNotEqual(first, second)
+
+            await asyncio.sleep(0.2)
+            log = json.loads(urllib_request.urlopen(f"{HTTP_URL}/api/showlog", timeout=2).read())
+            starts = [e for e in log["entries"] if e["event"] == "show_started"]
+            self.assertEqual(len(starts), 2)
+            self.assertEqual(starts[1]["detail"], "restart")
+
+            await cws.close()
+        asyncio.run(run())
+
+    def test_exit_clears_show_start_time(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            await cws.send(json.dumps({"type": "start_show"}))
+            await recv_type(cws, "full_state")
+            await cws.send(json.dumps({"type": "exit"}))
+            await asyncio.sleep(0.4)
+
+            cws2, _, state = await connect_caller("c2")
+            self.assertEqual(state["show_start_time"], "")
+            await cws2.close()
+        asyncio.run(run())
+
+    def test_go_records_last_go_time(self):
+        async def run():
+            cws, _, state = await connect_caller()
+            self.assertEqual(state["last_go_time"], "")
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "go", "client_id": "p1"}))
+            await recv_type(pws, "go_called")
+            state = await recv_type(cws, "full_state")
+            self.assertTrue(state["last_go_time"])
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+
 if __name__ == "__main__":
     unittest.main()

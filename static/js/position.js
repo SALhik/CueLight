@@ -18,6 +18,10 @@
   const lockOverlay = document.getElementById("lockOverlay");
   const noteDisplay = document.getElementById("noteDisplay");
   const flashOverlay = document.getElementById("flashOverlay");
+  const showBanner = document.getElementById("showBanner");
+  const problemPanel = document.getElementById("problemPanel");
+  const problemBtn = document.getElementById("problemBtn");
+  const problemInput = document.getElementById("problemInput");
 
   let ws = null;
   let standbyState = "idle";
@@ -51,6 +55,7 @@
         applyColor(msg.color || "");
         setStandby(msg.standby);
         setGo(msg.go);
+        setProblem(!!msg.problem);
         toggleLock(msg.locked);
         callerWarning.classList.toggle("visible", !msg.caller_connected);
         if (msg.scene) sceneDisplay.textContent = `Scene ${msg.scene}`;
@@ -69,13 +74,25 @@
 
       case "standby_called":
         hideFlash();
+        hideProblemPanel();
         setStandby("called");
+        alertStandby();
         break;
 
       case "go_called":
         hideFlash();
+        hideProblemPanel();
         setStandby("idle");
         setGo("called");
+        alertGo();
+        break;
+
+      case "problem_changed":
+        setProblem(!!msg.problem);
+        break;
+
+      case "show_started":
+        showStartBanner();
         break;
 
       case "flash":
@@ -196,6 +213,138 @@
     localStorage.removeItem("cuelight_label");
     location.href = "/join";
   });
+
+  // --- Problem signal ---
+  let problemActive = false;
+  let bannerTimer = null;
+
+  function setProblem(active) {
+    problemActive = active;
+    problemBtn.classList.toggle("active", active);
+    problemPanel.classList.toggle("active", active);
+    if (!active) hideProblemPanel();
+  }
+
+  function hideProblemPanel() {
+    problemPanel.classList.remove("visible");
+  }
+
+  function raiseProblem(message) {
+    ws.send(JSON.stringify({ type: "raise_problem", message: (message || "").slice(0, 60) }));
+    hideProblemPanel();
+    problemInput.value = "";
+    problemInput.blur();
+  }
+
+  problemBtn.addEventListener("click", () => {
+    problemPanel.classList.toggle("visible");
+  });
+
+  problemPanel.querySelectorAll(".problem-preset").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      raiseProblem(btn.dataset.msg);
+    });
+  });
+
+  document.getElementById("problemRaiseBtn").addEventListener("click", () => {
+    raiseProblem(problemInput.value.trim());
+  });
+
+  document.getElementById("problemClearBtn").addEventListener("click", () => {
+    ws.send(JSON.stringify({ type: "clear_problem" }));
+    hideProblemPanel();
+  });
+
+  // --- Show started notice (transient, non-blocking) ---
+  function showStartBanner() {
+    showBanner.classList.add("visible");
+    if (bannerTimer) clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => {
+      showBanner.classList.remove("visible");
+      bannerTimer = null;
+    }, 4000);
+  }
+
+  // --- Operator alerts: beep + vibration on incoming cues (opt-in) ---
+  // WebAudio needs a user gesture to start (same constraint as keepawake),
+  // so the context is created/resumed on taps while alerts are on.
+  // navigator.vibrate is Android-only; iOS relies on the beep.
+  const alertBtn = document.getElementById("alertBtn");
+  let alertsOn = localStorage.getItem("cuelight_alerts") === "on";
+  let audioCtx = null;
+
+  function ensureAudio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audioCtx) {
+      try { audioCtx = new AC(); } catch (e) { return; }
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(function () {});
+  }
+
+  function beepAt(t, freq, dur) {
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.4, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+
+  function vibrate(pattern) {
+    if (navigator.vibrate) {
+      try { navigator.vibrate(pattern); } catch (e) {}
+    }
+  }
+
+  function alertStandby() {
+    if (!alertsOn) return;
+    vibrate([120, 90, 120]);
+    if (audioCtx && audioCtx.state === "running") {
+      var t = audioCtx.currentTime;
+      beepAt(t, 880, 0.12);       // two short beeps = standby
+      beepAt(t + 0.22, 880, 0.12);
+    }
+  }
+
+  function alertGo() {
+    if (!alertsOn) return;
+    vibrate([400]);
+    if (audioCtx && audioCtx.state === "running") {
+      beepAt(audioCtx.currentTime, 587, 0.45); // one long beep = GO
+    }
+  }
+
+  function applyAlerts() {
+    alertBtn.textContent = alertsOn ? "ALERT: ON" : "ALERT";
+    alertBtn.classList.toggle("active", alertsOn);
+    localStorage.setItem("cuelight_alerts", alertsOn ? "on" : "off");
+  }
+
+  alertBtn.addEventListener("click", () => {
+    alertsOn = !alertsOn;
+    applyAlerts();
+    if (alertsOn) {
+      // This tap is the unlock gesture; a soft blip confirms sound works.
+      // resume() is async, so chain the confirmation beep off its promise.
+      ensureAudio();
+      Promise.resolve(audioCtx && audioCtx.resume ? audioCtx.resume() : null).then(function () {
+        if (audioCtx && audioCtx.state === "running") {
+          beepAt(audioCtx.currentTime, 880, 0.08);
+        }
+      });
+    }
+  });
+
+  document.addEventListener("touchend", function () { if (alertsOn) ensureAudio(); }, true);
+  document.addEventListener("click", function () { if (alertsOn) ensureAudio(); }, true);
+
+  applyAlerts();
 
   // --- Running-mode dimming (cycles off → dim → red → off) ---
   const dimOverlay = document.getElementById("dimOverlay");

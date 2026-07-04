@@ -110,6 +110,7 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
+      if (pos.problem) col.classList.add("problem");
 
       var header = document.createElement("div");
       header.className = "col-header";
@@ -118,6 +119,8 @@
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
+      } else if (pos.problem) {
+        badgeHtml = '<div class="col-badge problem-badge">⚠ PROBLEM</div>';
       } else {
         badgeHtml = '<div class="col-badge"></div>';
       }
@@ -127,6 +130,14 @@
         '<div class="pos-label"><span class="pos-label-pill"' + pillStyle + ">" + escHtml(pos.label) + "</span></div>" +
         '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>";
       col.appendChild(header);
+
+      // Read-only: the observer sees the message inline under the header
+      if (pos.problem && pos.problem_message) {
+        var msgEl = document.createElement("div");
+        msgEl.className = "problem-msg";
+        msgEl.textContent = pos.problem_message;
+        col.appendChild(msgEl);
+      }
 
       var sbBtn = document.createElement("div");
       sbBtn.className = "col-btn btn-standby-caller";
