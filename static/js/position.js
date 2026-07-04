@@ -275,11 +275,13 @@
   function cueAlert(kind) {
     if (!alertOn) return;
     ensureAudio();
-    if (kind === "standby") {
-      beep(880, 0.15, 0);
-      beep(880, 0.15, 0.22);
-    } else {
-      beep(660, 0.25, 0);
+    if (audioCtx && audioCtx.state === "running") {
+      if (kind === "standby") {
+        beep(880, 0.15, 0);
+        beep(880, 0.15, 0.22);
+      } else {
+        beep(660, 0.25, 0);
+      }
     }
     if (navigator.vibrate) {
       try { navigator.vibrate(kind === "standby" ? [200, 100, 200] : 300); } catch (e) {}
