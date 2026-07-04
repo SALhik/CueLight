@@ -749,8 +749,10 @@ demand from the log — nothing extra is stored**. It includes the show's start
 / end / duration, totals (standbys, GOs, master GOs, cue advances, attention
 reports), per-position acknowledge statistics (how many standbys/GOs each
 operator received and their average / worst time-to-ack), OSC fire counts,
-and the time between consecutive master GOs. Opens as plain text you can save
-or print; `GET /api/showreport` returns the same data as JSON for tooling.
+and the time between consecutive master GOs. Available in three formats: plain text (`?format=txt`) you can save or print,
+CSV (`?format=csv`) for spreadsheet import (cells are sanitised against
+formula-injection), and HTML (`?format=html`) for a self-contained dark-themed
+report. `GET /api/showreport` (no format) returns the data as JSON for tooling.
 
 ---
 
@@ -836,7 +838,7 @@ useful for integration or debugging.
 | `GET /api/patch/{filename}` | Fetch a patch's JSON |
 | `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) 🔒 |
 | `GET /api/showlog` | Show event log as JSON (`?format=csv` for CSV download) 🔒 |
-| `GET /api/showreport` | Post-show report from the log (`?format=txt` for plain text) 🔒 |
+| `GET /api/showreport` | Post-show report from the log (`?format=txt\|csv\|html`; default JSON) 🔒 |
 | `GET /api/backup_info` | Whether an EXIT backup exists (plus showfile/position count) |
 | `POST /api/resume_show` | Restore the EXIT backup into the running server 🔒 |
 | `GET /api/qr?password=…` | PNG QR code for the join URL |

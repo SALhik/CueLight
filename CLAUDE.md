@@ -149,7 +149,7 @@ Three endpoints: `/ws/caller`, `/ws/position`, and `/ws/observer`. On connect, t
 
 **Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `osc_result`, `ping`, `error`
 
-**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save), `GET /api/showlog` (`?format=csv`), `GET /api/showreport` (`?format=txt`), `GET /api/backup_info`, `POST /api/resume_show`, `POST /api/csv/import`, `POST /api/csv/export`
+**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save), `GET /api/showlog` (`?format=csv`), `GET /api/showreport` (`?format=txt|csv|html`), `GET /api/backup_info`, `POST /api/resume_show`, `POST /api/csv/import`, `POST /api/csv/export`
 
 **HTTP auth:** when a join password is set, the mutating endpoints (`POST /api/showfile/{f}`, `POST /api/patch/{f}` including `_probe_test`, `POST /api/resume_show`) and `GET /api/showlog` / `GET /api/showreport` require it — `X-CueLight-Password` header or `?password=` query param, checked by `_password_ok()` in main.py; wrong/missing → 401. The caller sends it from `full_state` (`pwAuth()`/`pwQuery()` in caller.js); the editor prompts on the first 401 and keeps it in `sessionStorage` (`authFetch()` in editor.js). `POST /api/_test_reset` answers 404 unless the `CUELIGHT_TEST_MODE=1` env var is set — it must never be callable in production.
 
@@ -167,7 +167,7 @@ Positions can flag the caller: `raise_attention {message}` sets `Position.attent
 
 ### Show report
 
-`server/showreport.py` — `build_report(entries)` computes a post-show summary from the show log **on demand, storing nothing**: show start (prefers the `show_started` event, else first entry) / end / duration, event totals, per-position standby/GO counts with ack latency avg/max (pairing each `*_called` with the next `*_acked` per position), OSC fire and attention counts, and gaps between consecutive `master_go`s. `report_to_text()` renders it as plain text. Served by `GET /api/showreport` (`?format=txt`; password-gated), opened from Settings → Show Log → "Show report".
+`server/showreport.py` — `build_report(entries)` computes a post-show summary from the show log **on demand, storing nothing**: show start (prefers the `show_started` event, else first entry) / end / duration, event totals, per-position standby/GO counts with ack latency avg/max (pairing each `*_called` with the next `*_acked` per position), OSC fire and attention counts, and gaps between consecutive `master_go`s. Three renderers: `report_to_text()` (plain text), `report_to_csv()` (CSV with formula-injection sanitisation via `_DANGEROUS`/`_safe`), and `report_to_html()` (self-contained dark-theme HTML). Served by `GET /api/showreport` (`?format=txt|csv|html`; password-gated): `txt` → `text/plain`, `csv` → `text/csv` with `Content-Disposition: attachment`, `html` → `text/html`, default → JSON. Opened from Settings → Show Log → "Show report".
 
 ### Cue alert (position, frontend-only)
 
