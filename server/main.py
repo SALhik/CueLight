@@ -17,7 +17,7 @@ from .files import require_safe_filename
 from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
 from .showcsv import csv_to_cues, cues_to_csv
-from .showreport import build_report, report_to_text
+from .showreport import build_report, report_to_csv, report_to_html, report_to_text
 from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
 from .state import StateManager
 from .ws import caller_ws_handler, observer_ws_handler, position_ws_handler
@@ -345,6 +345,14 @@ async def api_showreport(request: Request, format: str = "json"):
     report = build_report(manager.log.entries)
     if format == "txt":
         return Response(report_to_text(report), media_type="text/plain; charset=utf-8")
+    if format == "csv":
+        return Response(
+            report_to_csv(report),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="showreport.csv"'},
+        )
+    if format == "html":
+        return Response(report_to_html(report), media_type="text/html; charset=utf-8")
     return report
 
 

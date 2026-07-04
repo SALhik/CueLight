@@ -2767,6 +2767,71 @@ class TestShowReport(CueLightTestCase):
         status, _, _ = self._get("/api/showreport?password=secret")
         self.assertEqual(status, 200)
 
+    def test_report_csv_format(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+        status, body, headers = self._get("/api/showreport?format=csv")
+        self.assertEqual(status, 200)
+        self.assertIn("text/csv", headers.get("Content-Type", ""))
+        self.assertIn("attachment", headers.get("Content-Disposition", ""))
+        text = body.decode()
+        # Must have a header row and at least one data row
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        self.assertGreater(len(lines), 1)
+        self.assertIn("section", lines[0])
+        self.assertIn("LX", text)
+
+    def test_report_html_format(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+        status, body, headers = self._get("/api/showreport?format=html")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers.get("Content-Type", ""))
+        text = body.decode()
+        self.assertIn("<!DOCTYPE html>", text)
+        self.assertIn("CueLight Show Report", text)
+        self.assertIn("LX", text)
+
+    def test_report_csv_injection_sanitized(self):
+        """A position label starting with '=' must be prefixed with ' in CSV output."""
+        async def run():
+            cws, _, _ = await connect_caller()
+            # Label starts with '=' — the classic spreadsheet formula trigger
+            pws, _ = await connect_position("p1", "=SUM(A1)")
+            await drain(cws)
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await asyncio.sleep(0.05)
+            await pws.send(json.dumps({"type": "ack_standby"}))
+            await recv_full_state_where(
+                cws, lambda m: m["positions"]["p1"]["standby"] == "acked")
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+        status, body, _ = self._get("/api/showreport?format=csv")
+        self.assertEqual(status, 200)
+        text = body.decode()
+        # The raw label must not appear unescaped; the safe form must be present
+        self.assertNotIn(",=SUM(A1),", text)
+        self.assertIn("'=SUM(A1)", text)
+
 
 class TestReconnectLabelUniqueness(CueLightTestCase):
     def test_reconnect_with_conflicting_label_rejected(self):
