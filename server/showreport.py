@@ -252,10 +252,10 @@ def report_to_html(report: dict[str, Any]) -> str:
 
     # Show summary section
     summary_rows = [
-        td("Generated", esc(report["generated_at"])),
-        td("Started", esc(show["started"] or "—")),
-        td("Ended", esc(show["ended"] or "—")),
-        td("Duration", esc(_fmt_duration(show["duration_s"]))),
+        td("Generated", report["generated_at"]),
+        td("Started", show["started"] or "—"),
+        td("Ended", show["ended"] or "—"),
+        td("Duration", _fmt_duration(show["duration_s"])),
         td("Standbys called", show["standbys_called"]),
         td("GOs called", show["gos_called"]),
         td("Master GOs", show["master_gos"]),
