@@ -17,6 +17,26 @@
     document.getElementById("tab-patches").classList.add("active");
   }
 
+  // --- Password auth ---
+  // Saving (and probe-testing) requires the show password when one is set.
+  // The editor runs standalone, so it asks on the first 401 and remembers
+  // the answer for the session.
+  var authPassword = sessionStorage.getItem("cuelight_editor_pw") || "";
+
+  async function authFetch(url, options) {
+    options = options || {};
+    while (true) {
+      options.headers = Object.assign({}, options.headers);
+      if (authPassword) options.headers["X-CueLight-Password"] = authPassword;
+      var res = await fetch(url, options);
+      if (res.status !== 401) return res;
+      var pw = prompt("This show is password-protected. Enter the show password:");
+      if (pw === null) return res;
+      authPassword = pw;
+      sessionStorage.setItem("cuelight_editor_pw", pw);
+    }
+  }
+
   // ========== SHOWFILE EDITOR ==========
   var cueBody = document.getElementById("cueBody");
   var cues = [];
@@ -88,7 +108,7 @@
         };
       }),
     };
-    var res = await fetch("/api/showfile/" + encodeURIComponent(currentFilename), {
+    var res = await authFetch("/api/showfile/" + encodeURIComponent(currentFilename), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -98,7 +118,7 @@
       loadFileList();
     } else {
       var err = await res.json();
-      showStatus("statusMsg", "Errors: " + (err.errors || []).join("; "), true);
+      showStatus("statusMsg", "Errors: " + (err.errors || [err.error || "save failed"]).join("; "), true);
     }
   });
 
@@ -324,7 +344,7 @@
         return dev;
       }),
     };
-    var res = await fetch("/api/patch/" + encodeURIComponent(currentPatchFilename), {
+    var res = await authFetch("/api/patch/" + encodeURIComponent(currentPatchFilename), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -334,7 +354,7 @@
       loadPatchList();
     } else {
       var err = await res.json();
-      showStatus("patchStatusMsg", "Errors: " + (err.errors || []).join("; "), true);
+      showStatus("patchStatusMsg", "Errors: " + (err.errors || [err.error || "save failed"]).join("; "), true);
     }
   });
 
@@ -484,7 +504,7 @@
             protocol: d.protocol, ping_template: d.ping_template,
             expect_reply: d.expect_reply,
           };
-          var res = await fetch("/api/patch/_probe_test", {
+          var res = await authFetch("/api/patch/_probe_test", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),

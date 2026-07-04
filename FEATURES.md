@@ -21,6 +21,12 @@ pip install -r requirements.txt
 uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 
+No command-line experience needed: `./run.sh` (macOS/Linux) or double-clicking
+`run.bat` (Windows) does all of the above — the first run creates a private
+virtualenv and installs dependencies, then every run starts the server and
+prints the URLs to open. `python -m server [port]` is the equivalent once
+dependencies are installed.
+
 The server listens on all interfaces on port 8000. Find the host machine's LAN
 IP (Settings shows it, or `/api/info` returns it) and share
 `http://<ip>:8000` with the other devices.
@@ -146,6 +152,29 @@ watches the confirmations tick in live (see *Settings → Health & Latency*).
 An incoming standby or GO dismisses the overlay automatically, so a real cue
 can never be blocked by it.
 
+### Cue alert sounds (optional)
+
+Operators in a dark wing aren't always staring at the phone. The **ALERT**
+button in the bottom bezel (off by default, per device, survives reloads)
+adds a short double beep on STANDBY and a single lower beep on GO, plus
+vibration on devices that support it (Android). The first tap after enabling
+arms the audio (browsers require a touch before a page may make sound).
+
+### Reporting a problem (attention)
+
+The **⚠** button in the bottom bezel lets an operator flag the caller without
+leaving their post: tap it and either pick a quick preset (**NOT READY**,
+**TECH PROBLEM**, **NEED HELP**) or type a short message and tap **RAISE ⚠**.
+The button pulses orange while the report is up. On the Caller, the position's
+column shows a pulsing ⚠ ATTENTION badge and the message appears in an orange
+banner above the grid.
+
+- Tap ⚠ again to **withdraw** the report yourself.
+- When the caller clears it, the operator sees "✓ Seen by caller".
+- **Attention works even while the system is LOCKED** — the lock overlay has
+  its own "⚠ REPORT PROBLEM" button, because a safety report must never be
+  frozen out by a hold.
+
 ### Screen dimming (running mode)
 
 Backstage must be dark, and a phone at normal brightness glows like a lantern.
@@ -268,10 +297,12 @@ The **SETTINGS** button opens a modal with these sections:
    the editor's Patches tab. See *OSC outbound*.
 4. **Network** — the server host/address to share with operators, including the
    `cuelight.local` mDNS name when it's active.
-5. **Show Log** — download the show's event log as CSV, or view the raw JSON
-   (see *Show log*).
-6. **Previous Show** — appears only when an EXIT backup exists; resumes it.
-7. **Security** — the password toggle and field (see *Password protection*).
+5. **Show Log** — download the show's event log as CSV, view the raw JSON, or
+   open the **show report** (see *Show log*).
+6. **Show Clock** — choose what the bottom-bar clock strip displays: time of
+   day, elapsed since show start, time since last GO (see *Show clock*).
+7. **Previous Show** — appears only when an EXIT backup exists; resumes it.
+8. **Security** — the password toggle and field (see *Password protection*).
 
 ### Join info / QR code
 
@@ -290,6 +321,31 @@ Toggle it back off with **Hide join info**.
 When a showfile is loaded and the current cue targets a position that isn't
 connected, a warning banner appears on the Caller (e.g.
 "Cue 3: Fly not connected"), so you know before firing the cue.
+
+### Operator attention reports
+
+When an operator raises **⚠** on their console (see *Reporting a problem*),
+the Caller sees it two ways at once: the position's column header shows a
+pulsing **⚠ ATTENTION** badge (and an orange top edge), and an orange banner
+above the grid lists each raised report with its message inline — readable at
+a glance, no tapping required. Each row has a **CLEAR** button; clearing tells
+that operator their report was seen. The banner sits **above the LOCK
+overlay**, so the caller can read and clear reports during a hold without
+unlocking. Observers see the same badge and banner (read-only). Reports and
+their clears are recorded in the show log.
+
+### Show clock
+
+The centre of the bottom bar is a live clock strip. Tap it to open the
+**Show Clock** dialog and hit **START SHOW** — the start time is recorded in
+the show log, every position briefly sees "⏱ Show clock started", and the
+strip begins counting. The clock survives a server restart mid-show; EXIT
+clears it. (Tapping the strip again offers *Clear clock…* for a mis-tap.)
+
+What the strip shows is configurable in **Settings → Show Clock** (per
+device): time of day, elapsed time since show start, and time since the last
+GO — any combination. Times are computed against the server's clock, so an
+iPad with a drifting clock still reads true.
 
 ### Position colors
 
@@ -686,6 +742,16 @@ manual calls.
 It doubles as a debugging trail: if a cue was missed, the log shows exactly
 when the standby went out and when (or whether) it was acknowledged.
 
+### Show report
+
+**Settings → Show Log → Show report** opens a post-show summary computed **on
+demand from the log — nothing extra is stored**. It includes the show's start
+/ end / duration, totals (standbys, GOs, master GOs, cue advances, attention
+reports), per-position acknowledge statistics (how many standbys/GOs each
+operator received and their average / worst time-to-ack), OSC fire counts,
+and the time between consecutive master GOs. Opens as plain text you can save
+or print; `GET /api/showreport` returns the same data as JSON for tooling.
+
 ---
 
 ## Password protection
@@ -699,6 +765,11 @@ Restrict who can join a show.
 - **QR convenience:** when join info is shown with a password set, the QR code
   embeds the password (`/join?pw=…`) so scanning auto-fills it.
 - **Disable:** toggle the password off in Settings; the field is cleared.
+- **What it protects:** joining as a Position or Observer, plus the write APIs
+  once a password is set — saving showfiles/patches from the editor (which
+  prompts for the password on first save and remembers it for the session),
+  resuming a previous show, and viewing/downloading the show log. The Caller
+  sends the password automatically.
 
 Verification happens via `POST /api/check_password`.
 
@@ -758,19 +829,23 @@ useful for integration or debugging.
 | `POST /api/check_label` | Check a label is free before joining |
 | `GET /api/showfiles` | List available showfile names |
 | `GET /api/showfile/{filename}` | Fetch a showfile's JSON |
-| `POST /api/showfile/{filename}` | Validate and save a showfile |
+| `POST /api/showfile/{filename}` | Validate and save a showfile 🔒 |
 | `POST /api/csv/import` | Convert CSV text to showfile cues (or row errors) |
 | `POST /api/csv/export` | Convert showfile JSON to downloadable CSV |
 | `GET /api/patches` | List available OSC patch names |
 | `GET /api/patch/{filename}` | Fetch a patch's JSON |
-| `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) |
-| `GET /api/showlog` | Show event log as JSON (`?format=csv` for CSV download) |
+| `POST /api/patch/{filename}` | Validate and save a patch (or probe-test with `_probe_test`) 🔒 |
+| `GET /api/showlog` | Show event log as JSON (`?format=csv` for CSV download) 🔒 |
+| `GET /api/showreport` | Post-show report from the log (`?format=txt` for plain text) 🔒 |
 | `GET /api/backup_info` | Whether an EXIT backup exists (plus showfile/position count) |
-| `POST /api/resume_show` | Restore the EXIT backup into the running server |
+| `POST /api/resume_show` | Restore the EXIT backup into the running server 🔒 |
 | `GET /api/qr?password=…` | PNG QR code for the join URL |
 | `WS /ws/caller` | Caller real-time channel |
 | `WS /ws/position` | Position real-time channel |
 | `WS /ws/observer` | Observer real-time channel (read-only mirror) |
+
+🔒 = when a join password is set, these require it: `X-CueLight-Password`
+header or `?password=` query parameter (wrong or missing → HTTP 401).
 
 ---
 

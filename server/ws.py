@@ -136,6 +136,15 @@ async def _handle_caller_message(ws: WebSocket, manager: StateManager, msg: dict
     elif msg_type == "remove_position":
         await manager.remove_position(msg["client_id"])
 
+    elif msg_type == "clear_attention":
+        await manager.clear_attention(msg["client_id"], by_caller=True)
+
+    elif msg_type == "start_show_clock":
+        await manager.start_show_clock()
+
+    elif msg_type == "clear_show_clock":
+        await manager.clear_show_clock()
+
     elif msg_type == "load_patch":
         from .patch import load_patch
         try:
@@ -205,6 +214,7 @@ async def position_ws_handler(ws: WebSocket, manager: StateManager) -> None:
         "locked": manager.state.locked,
         "caller_connected": manager.state.caller_connected,
         "color": pos.color if pos else "",
+        "attention": pos.attention if pos else False,
     }
     sf = manager.state.showfile
     if sf and pos:
@@ -289,6 +299,12 @@ async def _handle_position_message(
 
     elif msg_type == "ack_flash":
         await manager.ack_flash(client_id)
+
+    elif msg_type == "raise_attention":
+        await manager.raise_attention(client_id, str(msg.get("message", "")))
+
+    elif msg_type == "clear_attention":
+        await manager.clear_attention(client_id)
 
     elif msg_type == "rename":
         await manager.rename_position(client_id, msg["label"])

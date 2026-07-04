@@ -19,6 +19,10 @@
   --grey: #555;
   --osc-accent: #2a6a8a;
   --osc-accent-dim: #1a3a4a;
+  /* Operator attention: orange, distinct from standby red, go green,
+     preset yellow, and the yellow missing-position warning */
+  --attention-bright: #ff9500;
+  --attention-dim: #4a2f00;
 }
 
 html, body {

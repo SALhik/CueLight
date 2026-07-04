@@ -22,6 +22,8 @@
     <div class="bezel-left">
       <button class="btn-reset" id="resetBtn">RESET</button>
       <button class="btn-dim" id="dimBtn">DIM</button>
+      <button class="btn-dim" id="alertBtn">ALERT</button>
+      <button class="btn-attention" id="attentionBtn">⚠</button>
     </div>
     <div class="bezel-right">
       <span class="label-display" id="labelDisplay"></span>
@@ -29,7 +31,27 @@
     </div>
   </div>
   <div class="flash-overlay" id="flashOverlay">FLASH CHECK<br>TAP TO CONFIRM</div>
-  <div class="lock-overlay" id="lockOverlay">LOCKED</div>
+  <div class="lock-overlay" id="lockOverlay">
+    <span>LOCKED</span>
+    <button class="lock-attention" id="lockAttentionBtn">⚠ REPORT PROBLEM</button>
+  </div>
+  <div class="attention-panel" id="attentionPanel">
+    <div class="attention-box">
+      <div class="attention-title" id="attentionTitle">Report a problem to the caller</div>
+      <div class="attention-presets" id="attentionPresets">
+        <button class="preset-chip">NOT READY</button>
+        <button class="preset-chip">TECH PROBLEM</button>
+        <button class="preset-chip">NEED HELP</button>
+      </div>
+      <input type="text" id="attentionInput" maxlength="120" placeholder="Optional message…">
+      <div class="attention-actions">
+        <button id="attentionSendBtn">RAISE ⚠</button>
+        <button id="attentionWithdrawBtn" style="display:none">WITHDRAW</button>
+        <button id="attentionCancelBtn">CANCEL</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
   <div class="dim-overlay" id="dimOverlay"></div>
   <script src="/static/js/keepawake.js"></script>
   <script src="/static/js/position.js"></script>

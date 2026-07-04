@@ -62,6 +62,8 @@ def load_state() -> AppState:
     state.auto_standby = data.get("auto_standby", False)
     state.osc_patch_filename = data.get("osc_patch_filename", "")
     state.showfile_filename = data.get("showfile_filename", "")
+    # last_go_at is deliberately transient; the show clock survives restarts
+    state.show_started_at = data.get("show_started_at", 0.0)
 
     for cid, pdata in data.get("positions", {}).items():
         state.positions[cid] = Position(

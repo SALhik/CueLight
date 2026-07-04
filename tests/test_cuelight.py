@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 import threading
 import time
@@ -21,6 +22,10 @@ from urllib.error import HTTPError
 import uvicorn
 from websockets.asyncio.client import connect
 import websockets.exceptions
+
+# The reset endpoint only exists when this is set; the server runs in a thread
+# of this process, so it sees the variable.
+os.environ["CUELIGHT_TEST_MODE"] = "1"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATE_SNAPSHOT = PROJECT_ROOT / "state" / "snapshot.json"
@@ -139,6 +144,20 @@ async def recv_settled_probe(cws, client_id: str, timeout: float = 3.0):
             if pos and pos["osc_probe"] != "probing":
                 return pos
     raise AssertionError(f"probe for {client_id} did not settle within {timeout}s")
+
+
+async def recv_full_state_where(ws, pred, timeout: float = 2.0):
+    """Waits for a full_state matching pred (other messages may interleave)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=deadline - time.time())
+        except asyncio.TimeoutError:
+            break
+        msg = json.loads(raw)
+        if msg.get("type") == "full_state" and pred(msg):
+            return msg
+    raise AssertionError(f"expected full_state not received within {timeout}s")
 
 
 async def drain(ws, count: int = 20, timeout: float = 0.3):
@@ -2445,6 +2464,336 @@ class TestShowLog(CueLightTestCase):
 
             await pws.close()
             await cws.close()
+        asyncio.run(run())
+
+
+class TestHttpHardening(CueLightTestCase):
+    """The test-reset gate and password auth on mutating HTTP endpoints."""
+
+    VALID_SHOWFILE = json.dumps({
+        "show_name": "PW Test", "version": 1,
+        "cues": [{"sequence": 1, "scene": "1.1",
+                  "targets": [{"position": "LX", "cue_number": "1"}]}],
+    }).encode()
+
+    def _http(self, method: str, path: str, body: bytes | None = None,
+              headers: dict | None = None):
+        req = urllib_request.Request(
+            f"{HTTP_URL}{path}",
+            data=body,
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method=method,
+        )
+        try:
+            resp = urllib_request.urlopen(req, timeout=2)
+            return resp.status, resp.read()
+        except HTTPError as e:
+            return e.code, e.read()
+
+    def _enable_password(self, password: str = "secret"):
+        async def run():
+            cws, _, _ = await connect_caller()
+            await cws.send(json.dumps(
+                {"type": "set_password", "enabled": True, "password": password}))
+            await recv_type(cws, "full_state")
+            await cws.close()
+        asyncio.run(run())
+
+    def test_test_reset_absent_without_env(self):
+        os.environ.pop("CUELIGHT_TEST_MODE", None)
+        try:
+            status, _ = self._http("POST", "/api/_test_reset", b"")
+            self.assertEqual(status, 404)
+        finally:
+            os.environ["CUELIGHT_TEST_MODE"] = "1"
+
+    def test_showfile_save_requires_password(self):
+        self._enable_password()
+        path = "/api/showfile/_test_pw_tmp.json"
+        try:
+            status, _ = self._http("POST", path, self.VALID_SHOWFILE)
+            self.assertEqual(status, 401)
+            status, _ = self._http("POST", path, self.VALID_SHOWFILE,
+                                   {"X-CueLight-Password": "wrong"})
+            self.assertEqual(status, 401)
+            status, _ = self._http("POST", path, self.VALID_SHOWFILE,
+                                   {"X-CueLight-Password": "secret"})
+            self.assertEqual(status, 200)
+        finally:
+            (PROJECT_ROOT / "showfiles" / "_test_pw_tmp.json").unlink(missing_ok=True)
+
+    def test_patch_save_and_probe_require_password(self):
+        self._enable_password()
+        status, _ = self._http("POST", "/api/patch/_test_pw_tmp.json", b"{}")
+        self.assertEqual(status, 401)
+        status, _ = self._http("POST", "/api/patch/_probe_test", b"{}")
+        self.assertEqual(status, 401)
+
+    def test_showlog_requires_password(self):
+        self._enable_password()
+        status, _ = self._http("GET", "/api/showlog")
+        self.assertEqual(status, 401)
+        # The download link can't set headers, so a query param also works
+        status, body = self._http("GET", "/api/showlog?password=secret")
+        self.assertEqual(status, 200)
+        self.assertIn("entries", json.loads(body))
+
+    def test_resume_requires_password(self):
+        self._enable_password()
+        status, _ = self._http("POST", "/api/resume_show", b"")
+        self.assertEqual(status, 401)
+
+    def test_endpoints_open_when_no_password(self):
+        try:
+            status, _ = self._http(
+                "POST", "/api/showfile/_test_pw_tmp.json", self.VALID_SHOWFILE)
+            self.assertEqual(status, 200)
+        finally:
+            (PROJECT_ROOT / "showfiles" / "_test_pw_tmp.json").unlink(missing_ok=True)
+        status, _ = self._http("GET", "/api/showlog")
+        self.assertEqual(status, 200)
+
+
+class TestAttention(CueLightTestCase):
+    def test_raise_and_clear_by_caller(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_attention", "message": "mic 3 dead"}))
+            msg = await recv_full_state_where(
+                cws, lambda m: m["positions"].get("p1", {}).get("attention"))
+            self.assertEqual(msg["positions"]["p1"]["attention_message"], "mic 3 dead")
+
+            await cws.send(json.dumps({"type": "clear_attention", "client_id": "p1"}))
+            await recv_type(pws, "attention_cleared")
+            msg = await recv_full_state_where(
+                cws, lambda m: not m["positions"].get("p1", {}).get("attention"))
+            self.assertEqual(msg["positions"]["p1"]["attention_message"], "")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_operator_can_withdraw(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_attention", "message": "wait"}))
+            await recv_full_state_where(
+                cws, lambda m: m["positions"].get("p1", {}).get("attention"))
+            await pws.send(json.dumps({"type": "clear_attention"}))
+            await recv_full_state_where(
+                cws, lambda m: not m["positions"].get("p1", {}).get("attention"))
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_attention_works_while_locked(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "lock", "locked": True}))
+            await recv_full_state_where(cws, lambda m: m["locked"])
+            await pws.send(json.dumps({"type": "raise_attention", "message": "help"}))
+            msg = await recv_full_state_where(
+                cws, lambda m: m["positions"].get("p1", {}).get("attention"))
+            self.assertEqual(msg["positions"]["p1"]["attention_message"], "help")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_caller_can_clear_attention_while_locked(self):
+        # Pins behavior the caller UI depends on: the banner sits above the
+        # lock overlay, so clearing must work server-side during a hold.
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_attention", "message": "help"}))
+            await recv_full_state_where(
+                cws, lambda m: m["positions"].get("p1", {}).get("attention"))
+            await cws.send(json.dumps({"type": "lock", "locked": True}))
+            await recv_full_state_where(cws, lambda m: m["locked"])
+
+            await cws.send(json.dumps({"type": "clear_attention", "client_id": "p1"}))
+            await recv_type(pws, "attention_cleared")
+            msg = await recv_full_state_where(
+                cws, lambda m: not m["positions"].get("p1", {}).get("attention"))
+            self.assertTrue(msg["locked"])
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_message_truncated(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await pws.send(json.dumps({"type": "raise_attention", "message": "x" * 500}))
+            msg = await recv_full_state_where(
+                cws, lambda m: m["positions"].get("p1", {}).get("attention"))
+            self.assertLessEqual(len(msg["positions"]["p1"]["attention_message"]), 120)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+
+class TestShowClock(CueLightTestCase):
+    def test_start_show_clock_notifies_positions(self):
+        async def run():
+            cws, _, state = await connect_caller()
+            self.assertEqual(state.get("show_started_at"), 0)
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "start_show_clock"}))
+            await recv_type(pws, "show_started")
+            msg = await recv_full_state_where(cws, lambda m: m.get("show_started_at", 0) > 0)
+            self.assertGreater(msg["show_started_at"], 0)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+    def test_clear_show_clock(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            await cws.send(json.dumps({"type": "start_show_clock"}))
+            await recv_full_state_where(cws, lambda m: m.get("show_started_at", 0) > 0)
+            await cws.send(json.dumps({"type": "clear_show_clock"}))
+            await recv_full_state_where(cws, lambda m: m.get("show_started_at", 1) == 0)
+            await cws.close()
+        asyncio.run(run())
+
+    def test_go_records_last_go_at(self):
+        async def run():
+            cws, _, state = await connect_caller()
+            self.assertEqual(state.get("last_go_at"), 0)
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "go", "client_id": "p1"}))
+            msg = await recv_full_state_where(cws, lambda m: m.get("last_go_at", 0) > 0)
+            self.assertGreater(msg["last_go_at"], 0)
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+
+class TestShowReport(CueLightTestCase):
+    def _get(self, path: str):
+        try:
+            resp = urllib_request.urlopen(f"{HTTP_URL}{path}", timeout=2)
+            return resp.status, resp.read(), resp.headers
+        except HTTPError as e:
+            return e.code, e.read(), e.headers
+
+    def test_report_counts_and_latency(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await asyncio.sleep(0.15)
+            await pws.send(json.dumps({"type": "ack_standby"}))
+            await recv_full_state_where(
+                cws, lambda m: m["positions"]["p1"]["standby"] == "acked")
+            await cws.send(json.dumps({"type": "go", "client_id": "p1"}))
+            await recv_type(pws, "go_called")
+            await pws.send(json.dumps({"type": "ack_go"}))
+            await recv_full_state_where(
+                cws, lambda m: m["positions"]["p1"]["go"] == "idle")
+
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+        status, body, _ = self._get("/api/showreport")
+        self.assertEqual(status, 200)
+        report = json.loads(body)
+        lx = report["positions"]["LX"]
+        self.assertEqual(lx["standbys"], 1)
+        self.assertEqual(lx["standby_acks"], 1)
+        self.assertGreaterEqual(lx["standby_ack_avg_s"], 0.05)
+        self.assertLess(lx["standby_ack_avg_s"], 3)
+        self.assertEqual(lx["gos"], 1)
+        self.assertEqual(lx["go_acks"], 1)
+        self.assertEqual(report["show"]["standbys_called"], 1)
+        self.assertEqual(report["show"]["gos_called"], 1)
+
+    def test_report_txt_format(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            pws, _ = await connect_position("p1", "LX")
+            await drain(cws)
+            await cws.send(json.dumps({"type": "standby", "client_id": "p1"}))
+            await recv_type(pws, "standby_called")
+            await pws.close()
+            await cws.close()
+        asyncio.run(run())
+
+        status, body, headers = self._get("/api/showreport?format=txt")
+        self.assertEqual(status, 200)
+        self.assertIn("text/plain", headers.get("Content-Type", ""))
+        text = body.decode()
+        self.assertIn("LX", text)
+
+    def test_report_password_gated(self):
+        async def run():
+            cws, _, _ = await connect_caller()
+            await cws.send(json.dumps(
+                {"type": "set_password", "enabled": True, "password": "secret"}))
+            await recv_type(cws, "full_state")
+            await cws.close()
+        asyncio.run(run())
+
+        status, _, _ = self._get("/api/showreport")
+        self.assertEqual(status, 401)
+        status, _, _ = self._get("/api/showreport?password=secret")
+        self.assertEqual(status, 200)
+
+
+class TestReconnectLabelUniqueness(CueLightTestCase):
+    def test_reconnect_with_conflicting_label_rejected(self):
+        async def run():
+            pws1, msg1 = await connect_position("p1", "LX")
+            self.assertEqual(msg1["type"], "joined")
+            pws2, msg2 = await connect_position("p2", "SND")
+            self.assertEqual(msg2["type"], "joined")
+            await pws1.close()
+            await asyncio.sleep(0.2)
+            # p1 comes back claiming p2's label (differing only in case)
+            ws = await connect(f"{WS_URL}/ws/position")
+            await ws.send(json.dumps({"client_id": "p1", "label": "snd"}))
+            msg = json.loads(await ws.recv())
+            self.assertEqual(msg["type"], "join_rejected")
+            await ws.close()
+            await pws2.close()
+        asyncio.run(run())
+
+    def test_reconnect_with_own_label_still_accepted(self):
+        async def run():
+            pws1, _ = await connect_position("p1", "LX")
+            await pws1.close()
+            await asyncio.sleep(0.2)
+            pws1b, msg = await connect_position("p1", "lx")
+            self.assertEqual(msg["type"], "joined")
+            await pws1b.close()
         asyncio.run(run())
 
 

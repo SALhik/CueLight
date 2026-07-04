@@ -98,7 +98,29 @@
     renderGrid();
     renderTransport();
     renderWarnings();
+    renderAttention();
     renderStatus();
+  }
+
+  function renderAttention() {
+    const banner = document.getElementById("attentionBanner");
+    const raised = Object.values(state.positions).filter((p) => p.attention);
+    banner.innerHTML = "";
+    if (raised.length === 0) {
+      banner.classList.remove("visible");
+      return;
+    }
+    raised.forEach((pos) => {
+      const row = document.createElement("div");
+      row.className = "attention-row";
+      row.innerHTML =
+        '<span class="who">⚠ ' + escHtml(pos.label) + "</span>" +
+        (pos.attention_message
+          ? '<span class="msg">' + escHtml(pos.attention_message) + "</span>"
+          : "");
+      banner.appendChild(row);
+    });
+    banner.classList.add("visible");
   }
 
   function renderGrid() {
@@ -110,11 +132,14 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
+      if (pos.attention) col.classList.add("attention");
 
       var header = document.createElement("div");
       header.className = "col-header";
       var badgeHtml;
-      if (isOsc) {
+      if (pos.attention) {
+        badgeHtml = '<div class="col-badge attention-badge flashing">⚠ ATTENTION</div>';
+      } else if (isOsc) {
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';

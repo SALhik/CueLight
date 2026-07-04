@@ -22,6 +22,9 @@
   <!-- Warning banner for missing positions -->
   <div class="warning-banner" id="warningBanner"></div>
 
+  <!-- Operator attention reports (one row per raised position) -->
+  <div class="attention-banner" id="attentionBanner"></div>
+
   <!-- Main grid -->
   <div class="grid-area">
     <div class="positions-grid" id="positionsGrid"></div>
@@ -51,6 +54,8 @@
     <button id="resetAllBtn">RESET ALL</button>
     <button id="exitBtn">EXIT</button>
     <button id="settingsBtn">SETTINGS</button>
+    <span class="spacer"></span>
+    <button class="clock-strip" id="clockStrip">⏱</button>
     <span class="spacer"></span>
     <button class="join-toggle" id="showJoinInfo">Show join info</button>
     <button class="join-toggle" id="hideJoinInfo" style="display:none">Hide join info</button>
@@ -112,6 +117,21 @@
       <div class="field">
         <button class="modal-btn" id="downloadLogBtn">Download CSV</button>
         <button class="modal-btn" id="viewLogBtn">View JSON</button>
+        <button class="modal-btn" id="showReportBtn">Show report</button>
+      </div>
+
+      <h3>Show Clock</h3>
+      <div class="field">
+        <label>Show time of day</label>
+        <input type="checkbox" id="clockShowTime">
+      </div>
+      <div class="field">
+        <label>Show elapsed since show start</label>
+        <input type="checkbox" id="clockShowElapsed">
+      </div>
+      <div class="field">
+        <label>Show time since last GO</label>
+        <input type="checkbox" id="clockShowGo">
       </div>
 
       <div id="resumeSection" style="display:none">
@@ -130,6 +150,21 @@
       <div class="field" id="pwValueField" style="display:none">
         <input type="text" id="pwInput" placeholder="Enter password">
         <button class="modal-btn" id="pwSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Show clock modal -->
+  <div class="modal-overlay" id="clockModal">
+    <div class="modal">
+      <button class="close-btn" id="closeClock">✕</button>
+      <h2>Show Clock</h2>
+      <div class="field">
+        <label id="clockStatus"></label>
+      </div>
+      <div class="field">
+        <button class="modal-btn" id="startShowBtn">START SHOW</button>
+        <button class="modal-btn" id="clearClockBtn">Clear clock…</button>
       </div>
     </div>
   </div>

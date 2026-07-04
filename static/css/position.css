@@ -134,6 +134,8 @@ body {
   inset: 0;
   background: rgba(0,0,0,0.85);
   display: none;
+  flex-direction: column;
+  gap: 24px;
   align-items: center;
   justify-content: center;
   z-index: 100;
@@ -143,6 +145,112 @@ body {
 }
 
 .lock-overlay.visible { display: flex; }
+
+/* Attention still works during a hold — the report button lives on the lock
+   overlay itself, and the panel sits above it (but below the dim overlay). */
+.lock-overlay .lock-attention {
+  background: var(--attention-dim);
+  color: var(--attention-bright);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.btn-attention {
+  background: var(--attention-dim);
+  color: var(--attention-bright);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.btn-attention.raised {
+  background: var(--attention-bright);
+  color: #111;
+  animation: flash 1s ease-in-out infinite;
+}
+
+.attention-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 130;
+}
+
+.attention-panel.visible { display: flex; }
+
+.attention-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  width: min(400px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.attention-box .attention-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--attention-bright);
+}
+
+.attention-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.preset-chip {
+  background: var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+}
+
+.attention-box input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.attention-actions { display: flex; gap: 8px; }
+
+.attention-actions button {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--border);
+  color: var(--text);
+}
+
+.attention-actions #attentionSendBtn,
+.attention-actions #attentionWithdrawBtn {
+  background: var(--attention-bright);
+  color: #111;
+}
+
+.toast {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-size: 14px;
+  display: none;
+  z-index: 140;
+}
+
+.toast.visible { display: block; }
 
 /* Flash roll call: below the lock overlay so LOCK always wins */
 .flash-overlay {

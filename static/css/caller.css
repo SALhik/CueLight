@@ -124,6 +124,14 @@ body {
   color: var(--osc-accent);
 }
 
+.position-col .col-header .col-badge.attention-badge {
+  color: var(--attention-bright);
+}
+
+.position-col.attention .col-header {
+  box-shadow: inset 0 3px 0 var(--attention-bright);
+}
+
 .position-col .col-btn {
   flex: 1;
   display: flex;
@@ -280,6 +288,49 @@ body {
 
 .warning-banner.visible { display: block; }
 
+/* Operator attention: one row per raised position, message inline so the
+   caller can read it at a glance without opening anything. Sits above the
+   lock overlay (115): LOCK freezes cue actions, not attention — the caller
+   must be able to read and clear reports during a hold. */
+.attention-banner {
+  background: var(--attention-dim);
+  display: none;
+  position: relative;
+  z-index: 116;
+}
+
+.attention-banner.visible { display: block; }
+
+.attention-banner .attention-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.attention-banner .attention-row .who {
+  color: var(--attention-bright);
+  font-weight: 700;
+}
+
+.attention-banner .attention-row .msg {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attention-banner .attention-row button {
+  margin-left: auto;
+  background: var(--attention-bright);
+  color: #111;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
 /* Bottom bar */
 .bottom-bar {
   background: var(--surface);
@@ -311,6 +362,17 @@ body {
 }
 
 .bottom-bar .spacer { flex: 1; }
+
+.bottom-bar .clock-strip {
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 12px;
+}
+
+.bottom-bar .clock-strip.running { color: var(--text); }
 
 .bottom-bar .join-toggle {
   background: none;

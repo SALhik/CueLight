@@ -38,7 +38,12 @@
     password: "",
     osc_patch_filename: "",
     auto_standby: false,
+    show_started_at: 0,
+    last_go_at: 0,
   };
+  // Server-vs-device clock skew, measured from heartbeat pings, so the show
+  // clock reads server time even if the iPad's clock drifts.
+  let serverClockOffset = 0;
   let reconnectDelay = 500;
   let lockHoldTimer = null;
   let renamingClientId = null;
@@ -105,6 +110,8 @@
         state.password = msg.password || "";
         state.osc_patch_filename = msg.osc_patch_filename || "";
         state.auto_standby = !!msg.auto_standby;
+        state.show_started_at = msg.show_started_at || 0;
+        state.last_go_at = msg.last_go_at || 0;
         render();
         break;
 
@@ -113,6 +120,7 @@
         break;
 
       case "ping":
+        serverClockOffset = Date.now() / 1000 - msg.ts;
         send({ type: "pong", ts: msg.ts });
         break;
     }
@@ -137,6 +145,8 @@
     renderGrid();
     renderTransport();
     renderWarnings();
+    renderAttention();
+    renderClock();
     renderLock();
     // Keep the roll-call/health list live while Settings is open
     if (document.getElementById("settingsModal").classList.contains("visible")) {
@@ -156,13 +166,16 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
+      if (pos.attention) col.classList.add("attention");
       col.dataset.clientId = cid;
 
       // Header
       var header = document.createElement("div");
       header.className = "col-header";
       var badgeHtml;
-      if (isOsc) {
+      if (pos.attention) {
+        badgeHtml = '<div class="col-badge attention-badge flashing">⚠ ATTENTION</div>';
+      } else if (isOsc) {
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
@@ -279,6 +292,110 @@
     lockOverlay.classList.toggle("visible", state.locked);
   }
 
+  // --- Operator attention banner ---
+  function renderAttention() {
+    const banner = document.getElementById("attentionBanner");
+    const raised = Object.entries(state.positions).filter(([, p]) => p.attention);
+    banner.innerHTML = "";
+    if (raised.length === 0) {
+      banner.classList.remove("visible");
+      return;
+    }
+    raised.forEach(([cid, pos]) => {
+      const row = document.createElement("div");
+      row.className = "attention-row";
+      row.innerHTML =
+        '<span class="who">⚠ ' + escHtml(pos.label) + "</span>" +
+        (pos.attention_message
+          ? '<span class="msg">' + escHtml(pos.attention_message) + "</span>"
+          : "");
+      const btn = document.createElement("button");
+      btn.textContent = "CLEAR";
+      btn.addEventListener("click", () => {
+        send({ type: "clear_attention", client_id: cid });
+      });
+      row.appendChild(btn);
+      banner.appendChild(row);
+    });
+    banner.classList.add("visible");
+  }
+
+  // --- Show clock ---
+  const clockStrip = document.getElementById("clockStrip");
+  let clockPrefs;
+  try {
+    clockPrefs = JSON.parse(localStorage.getItem("cuelight_clock_prefs")) || {};
+  } catch (e) {
+    clockPrefs = {};
+  }
+  clockPrefs = Object.assign({ time: true, elapsed: true, sinceGo: false }, clockPrefs);
+
+  function saveClockPrefs() {
+    localStorage.setItem("cuelight_clock_prefs", JSON.stringify(clockPrefs));
+  }
+
+  function fmtDur(s) {
+    s = Math.max(0, Math.floor(s));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? h + ":" + String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0")
+      : m + ":" + String(sec).padStart(2, "0");
+  }
+
+  function serverNow() {
+    return Date.now() / 1000 - serverClockOffset;
+  }
+
+  function renderClock() {
+    const parts = [];
+    if (clockPrefs.time) {
+      parts.push(new Date().toLocaleTimeString([], {
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }));
+    }
+    if (clockPrefs.elapsed) {
+      parts.push(state.show_started_at > 0
+        ? "SHOW " + fmtDur(serverNow() - state.show_started_at)
+        : "SHOW --:--");
+    }
+    if (clockPrefs.sinceGo) {
+      parts.push(state.last_go_at > 0
+        ? "GO +" + fmtDur(serverNow() - state.last_go_at)
+        : "GO --");
+    }
+    clockStrip.textContent = parts.length ? parts.join("  ·  ") : "⏱";
+    clockStrip.classList.toggle("running", state.show_started_at > 0);
+  }
+
+  setInterval(renderClock, 1000);
+
+  clockStrip.addEventListener("click", () => {
+    const started = state.show_started_at > 0;
+    document.getElementById("clockStatus").textContent = started
+      ? "Show started at " +
+        new Date(state.show_started_at * 1000).toLocaleTimeString() +
+        " — elapsed " + fmtDur(serverNow() - state.show_started_at)
+      : "Clock not started. START SHOW records the time in the show log and " +
+        "notifies all positions.";
+    document.getElementById("startShowBtn").style.display = started ? "none" : "";
+    document.getElementById("clearClockBtn").style.display = started ? "" : "none";
+    document.getElementById("clockModal").classList.add("visible");
+  });
+
+  document.getElementById("startShowBtn").addEventListener("click", () => {
+    send({ type: "start_show_clock" });
+    closeModal("clockModal");
+  });
+
+  document.getElementById("clearClockBtn").addEventListener("click", () => {
+    if (confirm("Clear the show clock?")) {
+      send({ type: "clear_show_clock" });
+      closeModal("clockModal");
+    }
+  });
+
   // --- Master buttons ---
   document.getElementById("masterStandby").addEventListener("click", () => {
     if (!state.locked) send({ type: "standby_armed" });
@@ -347,7 +464,7 @@
           const btn = document.getElementById("resumeShowBtn");
           btn.style.display = "";
           btn.addEventListener("click", async () => {
-            const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+            const res = await (await fetch("/api/resume_show", { method: "POST", headers: pwAuth() })).json();
             if (res.ok) location.reload();
           });
           return;
@@ -508,6 +625,11 @@
 
     document.getElementById("autoStandbyToggle").checked = state.auto_standby;
 
+    // Show clock display preferences (device-local)
+    document.getElementById("clockShowTime").checked = clockPrefs.time;
+    document.getElementById("clockShowElapsed").checked = clockPrefs.elapsed;
+    document.getElementById("clockShowGo").checked = clockPrefs.sinceGo;
+
     // Patches
     try {
       const res = await fetch("/api/patches");
@@ -572,6 +694,24 @@
     send({ type: "set_auto_standby", enabled: e.target.checked });
   });
 
+  document.getElementById("clockShowTime").addEventListener("change", (e) => {
+    clockPrefs.time = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
+  document.getElementById("clockShowElapsed").addEventListener("change", (e) => {
+    clockPrefs.elapsed = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
+  document.getElementById("clockShowGo").addEventListener("change", (e) => {
+    clockPrefs.sinceGo = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
   document.getElementById("loadPatchBtn").addEventListener("click", () => {
     const filename = document.getElementById("patchSelect").value;
     if (filename) {
@@ -592,7 +732,7 @@
   document.getElementById("resumeShowSettingsBtn").addEventListener("click", async () => {
     if (!confirm("Replace the current show with the previous one?")) return;
     try {
-      const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+      const res = await (await fetch("/api/resume_show", { method: "POST", headers: pwAuth() })).json();
       if (res.ok) closeModal("settingsModal");
     } catch (e) {}
   });
@@ -607,12 +747,31 @@
   });
 
   // --- Show log ---
+  // Protected endpoints want the join password when one is set; the caller
+  // already has it from full_state. Links can't set headers, so they get it
+  // as a query param instead.
+  function pwAuth() {
+    return state.password_enabled && state.password
+      ? { "X-CueLight-Password": state.password }
+      : {};
+  }
+
+  function pwQuery(sep) {
+    return state.password_enabled && state.password
+      ? sep + "password=" + encodeURIComponent(state.password)
+      : "";
+  }
+
   document.getElementById("downloadLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog?format=csv");
+    window.open("/api/showlog?format=csv" + pwQuery("&"));
   });
 
   document.getElementById("viewLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog");
+    window.open("/api/showlog" + pwQuery("?"));
+  });
+
+  document.getElementById("showReportBtn").addEventListener("click", () => {
+    window.open("/api/showreport?format=txt" + pwQuery("&"));
   });
 
   document.getElementById("pwToggle").addEventListener("change", (e) => {
@@ -673,6 +832,7 @@
   document.getElementById("closeSettings").addEventListener("click", () => closeModal("settingsModal"));
   document.getElementById("closeJump").addEventListener("click", () => closeModal("jumpModal"));
   document.getElementById("closeRename").addEventListener("click", () => closeModal("renameModal"));
+  document.getElementById("closeClock").addEventListener("click", () => closeModal("clockModal"));
 
   // Close modals on overlay click
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {
