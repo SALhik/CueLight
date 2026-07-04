@@ -144,7 +144,7 @@ body {
   color: var(--orange-bright);
   text-align: center;
   padding: 2px 4px;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .position-col .col-btn {
@@ -446,7 +446,7 @@ body {
   padding: 14px;
   font-size: 16px;
   margin-bottom: 12px;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .modal .problem-clear-btn {

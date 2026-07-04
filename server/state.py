@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from datetime import datetime
 from typing import Any
 
 from fastapi import WebSocket
@@ -14,6 +13,7 @@ from .models import (
 )
 from .persistence import save_state
 from .showlog import ShowLog
+from .timeutil import now_iso
 
 
 COLOR_PALETTE = [
@@ -29,10 +29,6 @@ COLOR_PALETTE = [
 
 
 PROBLEM_MESSAGE_MAX = 60
-
-
-def _now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 
 class StateManager:
@@ -210,7 +206,7 @@ class StateManager:
             if not pos or self.state.locked:
                 return
             self._clear_transient_osc_results()
-            self.state.last_go_time = _now_iso()
+            self.state.last_go_time = now_iso()
             if pos.type == PositionType.OSC:
                 pos.standby = ButtonState.IDLE
                 pos.armed = False
@@ -272,7 +268,7 @@ class StateManager:
                 return
             self._clear_transient_osc_results()
             self.log.record("master_go", cue=self._current_cue_seq())
-            self.state.last_go_time = _now_iso()
+            self.state.last_go_time = now_iso()
             fire_jobs: list[tuple[str, OscDevice, str]] = []
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
@@ -420,7 +416,7 @@ class StateManager:
     async def start_show(self) -> None:
         async with self._lock:
             restarted = bool(self.state.show_start_time)
-            self.state.show_start_time = _now_iso()
+            self.state.show_start_time = now_iso()
             self.log.record("show_started", detail="restart" if restarted else "")
             self._persist()
             await self._broadcast_positions({

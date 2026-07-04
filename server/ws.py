@@ -299,7 +299,7 @@ async def _handle_position_message(
         await manager.ack_flash(client_id)
 
     elif msg_type == "raise_problem":
-        await manager.raise_problem(client_id, str(msg.get("message", "")))
+        await manager.raise_problem(client_id, str(msg.get("message") or ""))
 
     elif msg_type == "clear_problem":
         await manager.clear_problem(client_id, by_caller=False)

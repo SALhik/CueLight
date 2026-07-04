@@ -17,6 +17,7 @@ from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
 from .showcsv import csv_to_cues, cues_to_csv
 from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
+from .showreport import report_csv, report_html
 from .state import StateManager
 from .ws import caller_ws_handler, observer_ws_handler, position_ws_handler
 
@@ -318,7 +319,6 @@ async def api_showlog(format: str = "json"):
 async def api_showreport(format: str = "html"):
     """Post-show report computed on demand from the show log; nothing is
     stored server-side. Exposed like /api/showlog (no password gate)."""
-    from .showreport import report_csv, report_html
     if format == "csv":
         return Response(
             report_csv(manager.log.entries),

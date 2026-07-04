@@ -330,11 +330,14 @@
     alertsOn = !alertsOn;
     applyAlerts();
     if (alertsOn) {
-      // This tap is the unlock gesture; a soft blip confirms sound works
+      // This tap is the unlock gesture; a soft blip confirms sound works.
+      // resume() is async, so chain the confirmation beep off its promise.
       ensureAudio();
-      if (audioCtx && audioCtx.state === "running") {
-        beepAt(audioCtx.currentTime, 880, 0.08);
-      }
+      Promise.resolve(audioCtx && audioCtx.resume ? audioCtx.resume() : null).then(function () {
+        if (audioCtx && audioCtx.state === "running") {
+          beepAt(audioCtx.currentTime, 880, 0.08);
+        }
+      });
     }
   });
 

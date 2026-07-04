@@ -165,7 +165,7 @@ def report_html(entries: list[dict[str, Any]]) -> str:
     ]
     problem_rows = [
         [p["time"], p["position"], p["cue"] or "—", p["message"] or "(no message)",
-         p["cleared"] and f"cleared {p['cleared']}" or "not cleared"]
+         (f"cleared {p['cleared']}" if p["cleared"] else "not cleared")]
         for p in r["problems"]
     ]
 
@@ -225,26 +225,35 @@ def report_csv(entries: list[dict[str, Any]]) -> str:
     r = compute_report(entries)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["section", "position", "cue", "metric", "value"])
+
+    _DANGEROUS = ("=", "+", "-", "@", "\t", "\r")
+
+    def _safe(row):
+        return ["'" + v if isinstance(v, str) and v[:1] in _DANGEROUS else v for v in row]
+
+    def write(row):
+        writer.writerow(_safe(row))
+
+    write(["section", "position", "cue", "metric", "value"])
     for t in r["show_started"]:
-        writer.writerow(["show_started", "", "", "time", t])
+        write(["show_started", "", "", "time", t])
     for s in r["position_stats"]:
-        writer.writerow(["standby_latency", s["position"], "", "count", s["count"]])
-        writer.writerow(["standby_latency", s["position"], "", "min_ms", _fmt_ms(s["min_ms"])])
-        writer.writerow(["standby_latency", s["position"], "", "avg_ms", _fmt_ms(s["avg_ms"])])
-        writer.writerow(["standby_latency", s["position"], "", "max_ms", _fmt_ms(s["max_ms"])])
+        write(["standby_latency", s["position"], "", "count", s["count"]])
+        write(["standby_latency", s["position"], "", "min_ms", _fmt_ms(s["min_ms"])])
+        write(["standby_latency", s["position"], "", "avg_ms", _fmt_ms(s["avg_ms"])])
+        write(["standby_latency", s["position"], "", "max_ms", _fmt_ms(s["max_ms"])])
     for lat in r["latencies"]:
-        writer.writerow(["standby_latency_per_cue", lat["position"], lat["cue"],
-                         "auto" if lat["auto"] else "manual", _fmt_ms(lat["ms"])])
+        write(["standby_latency_per_cue", lat["position"], lat["cue"],
+               "auto" if lat["auto"] else "manual", _fmt_ms(lat["ms"])])
     for u in r["unacked"]:
-        writer.writerow(["unacked_standby", u["position"], u["cue"], "", ""])
+        write(["unacked_standby", u["position"], u["cue"], "", ""])
     for g in r["go_intervals"]:
-        writer.writerow(["go_interval", "", g["cue"], "seconds", f"{g['seconds']:.1f}"])
-    writer.writerow(["standby_counts", "", "", "manual", r["manual_standbys"]])
-    writer.writerow(["standby_counts", "", "", "auto", r["auto_standbys"]])
+        write(["go_interval", "", g["cue"], "seconds", f"{g['seconds']:.1f}"])
+    write(["standby_counts", "", "", "manual", r["manual_standbys"]])
+    write(["standby_counts", "", "", "auto", r["auto_standbys"]])
     for pos, c in r["joins"].items():
-        writer.writerow(["join_summary", pos, "", "joins", c["joins"]])
-        writer.writerow(["join_summary", pos, "", "disconnects", c["disconnects"]])
+        write(["join_summary", pos, "", "joins", c["joins"]])
+        write(["join_summary", pos, "", "disconnects", c["disconnects"]])
     for p in r["problems"]:
-        writer.writerow(["problem", p["position"], p["cue"], p["cleared"] or "not cleared", p["message"]])
+        write(["problem", p["position"], p["cue"], p["cleared"] or "not cleared", p["message"]])
     return buf.getvalue()
