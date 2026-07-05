@@ -64,3 +64,8 @@ input {
 .flashing {
   animation: flash 0.5s ease-in-out infinite;
 }
+
+/* Utility: hide regardless of the element's own display rule */
+.hidden {
+  display: none !important;
+}

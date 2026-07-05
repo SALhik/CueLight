@@ -23,7 +23,7 @@
       <button class="btn-reset" id="resetBtn">RESET</button>
       <button class="btn-dim" id="dimBtn">DIM</button>
       <button class="btn-dim" id="alertBtn">ALERT</button>
-      <button class="btn-attention" id="attentionBtn">⚠</button>
+      <button class="btn-attention" id="attentionBtn" aria-label="Report a problem" title="Report a problem">⚠</button>
     </div>
     <div class="bezel-right">
       <span class="label-display" id="labelDisplay"></span>
@@ -46,7 +46,7 @@
       <input type="text" id="attentionInput" maxlength="120" placeholder="Optional message…">
       <div class="attention-actions">
         <button id="attentionSendBtn">RAISE ⚠</button>
-        <button id="attentionWithdrawBtn" style="display:none">WITHDRAW</button>
+        <button id="attentionWithdrawBtn" class="hidden">WITHDRAW</button>
         <button id="attentionCancelBtn">CANCEL</button>
       </div>
     </div>

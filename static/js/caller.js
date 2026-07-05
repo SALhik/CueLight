@@ -379,8 +379,8 @@
         " — elapsed " + fmtDur(serverNow() - state.show_started_at)
       : "Clock not started. START SHOW records the time in the show log and " +
         "notifies all positions.";
-    document.getElementById("startShowBtn").style.display = started ? "none" : "";
-    document.getElementById("clearClockBtn").style.display = started ? "" : "none";
+    document.getElementById("startShowBtn").classList.toggle("hidden", started);
+    document.getElementById("clearClockBtn").classList.toggle("hidden", !started);
     document.getElementById("clockModal").classList.add("visible");
   });
 

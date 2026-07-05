@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from threading import Timer
 
@@ -64,6 +65,13 @@ def load_state() -> AppState:
     state.showfile_filename = data.get("showfile_filename", "")
     # last_go_at is deliberately transient; the show clock survives restarts
     state.show_started_at = data.get("show_started_at", 0.0)
+    if not state.show_started_at and data.get("show_start_time"):
+        # Pre-rename snapshots stored the clock as an ISO string
+        try:
+            state.show_started_at = datetime.fromisoformat(
+                data["show_start_time"]).timestamp()
+        except (TypeError, ValueError):
+            pass
 
     for cid, pdata in data.get("positions", {}).items():
         state.positions[cid] = Position(

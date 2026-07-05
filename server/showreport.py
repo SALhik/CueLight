@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 # Characters that spreadsheet apps interpret as formula prefixes
-_DANGEROUS = ("=", "+", "-", "@", "\t", "\r")
+_DANGEROUS = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
 def _safe(value: object) -> object:
@@ -137,6 +137,11 @@ def _fmt_duration(seconds: float | None) -> str:
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+def _fmt_seconds(value: float | None) -> str:
+    """Seconds with unit, or a bare em-dash when there is no value."""
+    return "—" if value is None else f"{value}s"
+
+
 def report_to_text(report: dict[str, Any]) -> str:
     """Renders the report as a plain-text page a stage manager can save or print."""
     show = report["show"]
@@ -159,13 +164,13 @@ def report_to_text(report: dict[str, Any]) -> str:
         lines.append(f"  {label}")
         lines.append(
             f"    standbys {s['standbys']} (acked {s['standby_acks']}"
-            f", avg {s['standby_ack_avg_s'] if s['standby_ack_avg_s'] is not None else '—'}s"
-            f", max {s['standby_ack_max_s'] if s['standby_ack_max_s'] is not None else '—'}s)"
+            f", avg {_fmt_seconds(s['standby_ack_avg_s'])}"
+            f", max {_fmt_seconds(s['standby_ack_max_s'])})"
         )
         lines.append(
             f"    GOs      {s['gos']} (acked {s['go_acks']}"
-            f", avg {s['go_ack_avg_s'] if s['go_ack_avg_s'] is not None else '—'}s"
-            f", max {s['go_ack_max_s'] if s['go_ack_max_s'] is not None else '—'}s)"
+            f", avg {_fmt_seconds(s['go_ack_avg_s'])}"
+            f", max {_fmt_seconds(s['go_ack_max_s'])})"
         )
         if s["osc_fires"]:
             lines.append(f"    OSC fires {s['osc_fires']}")
@@ -267,14 +272,12 @@ def report_to_html(report: dict[str, Any]) -> str:
     # Positions section
     pos_rows = []
     for label, s in report["positions"].items():
-        avg_sb = _str(s["standby_ack_avg_s"])
-        max_sb = _str(s["standby_ack_max_s"])
-        avg_go = _str(s["go_ack_avg_s"])
-        max_go = _str(s["go_ack_max_s"])
         pos_rows.append(td(
             label,
-            s["standbys"], s["standby_acks"], avg_sb + "s", max_sb + "s",
-            s["gos"], s["go_acks"], avg_go + "s", max_go + "s",
+            s["standbys"], s["standby_acks"],
+            _fmt_seconds(s["standby_ack_avg_s"]), _fmt_seconds(s["standby_ack_max_s"]),
+            s["gos"], s["go_acks"],
+            _fmt_seconds(s["go_ack_avg_s"]), _fmt_seconds(s["go_ack_max_s"]),
             s["osc_fires"], s["attention"],
         ))
     pos_tbl = table(

@@ -383,7 +383,7 @@ class StateManager:
             if not pos or pos.type != PositionType.HUMAN:
                 return
             pos.attention = True
-            pos.attention_message = str(message)[: self.ATTENTION_MESSAGE_MAX]
+            pos.attention_message = str(message or "")[: self.ATTENTION_MESSAGE_MAX]
             self.log.record("attention_raised", position=pos.label,
                             cue=self._current_cue_seq(), detail=pos.attention_message)
             self._persist()

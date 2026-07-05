@@ -217,7 +217,8 @@
   if (DIM_MODES.indexOf(dimMode) === -1) dimMode = "off";
 
   function applyDim() {
-    dimOverlay.className = "dim-overlay" + (dimMode === "off" ? "" : " " + dimMode);
+    dimOverlay.classList.toggle("dim", dimMode === "dim");
+    dimOverlay.classList.toggle("red", dimMode === "red");
     dimBtn.textContent =
       dimMode === "off" ? "DIM" : dimMode === "dim" ? "DIM: ON" : "DIM: RED";
     localStorage.setItem("cuelight_dim_mode", dimMode);
@@ -253,7 +254,12 @@
       const AC = window.AudioContext || window.webkitAudioContext;
       if (AC) audioCtx = new AC();
     }
-    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (audioCtx && audioCtx.state === "suspended") {
+      // resume() is async; callers must wait for it or the first beep
+      // after enabling alerts lands while the context is still suspended
+      return audioCtx.resume().catch(() => {});
+    }
+    return Promise.resolve();
   }
 
   function beep(freq, dur, delay) {
@@ -274,15 +280,15 @@
 
   function cueAlert(kind) {
     if (!alertOn) return;
-    ensureAudio();
-    if (audioCtx && audioCtx.state === "running") {
+    ensureAudio().then(() => {
+      if (!audioCtx || audioCtx.state !== "running") return;
       if (kind === "standby") {
         beep(880, 0.15, 0);
         beep(880, 0.15, 0.22);
       } else {
         beep(660, 0.25, 0);
       }
-    }
+    });
     if (navigator.vibrate) {
       try { navigator.vibrate(kind === "standby" ? [200, 100, 200] : 300); } catch (e) {}
     }
@@ -325,10 +331,10 @@
     attentionTitle.textContent = attentionRaised
       ? "Report sent — waiting for caller"
       : "Report a problem to the caller";
-    attentionPresets.style.display = attentionRaised ? "none" : "flex";
-    attentionInput.style.display = attentionRaised ? "none" : "";
-    attentionSendBtn.style.display = attentionRaised ? "none" : "";
-    attentionWithdrawBtn.style.display = attentionRaised ? "" : "none";
+    attentionPresets.classList.toggle("hidden", attentionRaised);
+    attentionInput.classList.toggle("hidden", attentionRaised);
+    attentionSendBtn.classList.toggle("hidden", attentionRaised);
+    attentionWithdrawBtn.classList.toggle("hidden", !attentionRaised);
     attentionPanel.classList.add("visible");
   }
 
