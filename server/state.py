@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
 from typing import Any
 
 from fastapi import WebSocket
@@ -13,7 +14,6 @@ from .models import (
 )
 from .persistence import save_state
 from .showlog import ShowLog
-from .timeutil import now_iso
 
 
 COLOR_PALETTE = [
@@ -28,11 +28,9 @@ COLOR_PALETTE = [
 ]
 
 
-PROBLEM_MESSAGE_MAX = 60
-
-
 class StateManager:
     MAX_POSITIONS = 16
+    ATTENTION_MESSAGE_MAX = 120
 
     def __init__(self, initial: AppState | None = None) -> None:
         self.state = initial or AppState()
@@ -112,10 +110,11 @@ class StateManager:
 
     async def register_position(self, ws: WebSocket, client_id: str, label: str) -> bool | str:
         async with self._lock:
-            if client_id not in self.state.positions:
-                for p in self.state.positions.values():
-                    if p.label.lower() == label.lower():
-                        return "duplicate"
+            # Uniqueness must hold for reconnects too: a known client_id coming
+            # back with a changed label may not take another position's label.
+            for cid, p in self.state.positions.items():
+                if cid != client_id and p.label.lower() == label.lower():
+                    return "duplicate"
             if client_id in self.state.positions:
                 pos = self.state.positions[client_id]
                 pos.connected = True
@@ -206,7 +205,7 @@ class StateManager:
             if not pos or self.state.locked:
                 return
             self._clear_transient_osc_results()
-            self.state.last_go_time = now_iso()
+            self.state.last_go_at = time.time()
             if pos.type == PositionType.OSC:
                 pos.standby = ButtonState.IDLE
                 pos.armed = False
@@ -267,8 +266,8 @@ class StateManager:
             if self.state.locked:
                 return
             self._clear_transient_osc_results()
+            self.state.last_go_at = time.time()
             self.log.record("master_go", cue=self._current_cue_seq())
-            self.state.last_go_time = now_iso()
             fire_jobs: list[tuple[str, OscDevice, str]] = []
             for pos in self.state.positions.values():
                 if pos.armed and pos.connected:
@@ -374,55 +373,54 @@ class StateManager:
             self._persist()
             await self._notify_caller_full_state()
 
-    # --- Problem signal (position → caller) ---
+    # --- Operator attention ---
 
-    async def raise_problem(self, client_id: str, message: str = "") -> None:
+    async def raise_attention(self, client_id: str, message: str = "") -> None:
+        # Deliberately NOT blocked by the lock: an operator reporting a
+        # problem must get through even during a hold.
         async with self._lock:
             pos = self.state.positions.get(client_id)
-            if not pos or pos.type == PositionType.OSC:
+            if not pos or pos.type != PositionType.HUMAN:
                 return
-            pos.problem = True
-            pos.problem_message = message.strip()[:PROBLEM_MESSAGE_MAX]
-            self.log.record("problem_raised", position=pos.label,
-                            cue=self._current_cue_seq(), detail=pos.problem_message)
+            pos.attention = True
+            pos.attention_message = str(message or "")[: self.ATTENTION_MESSAGE_MAX]
+            self.log.record("attention_raised", position=pos.label,
+                            cue=self._current_cue_seq(), detail=pos.attention_message)
             self._persist()
-            await self._send_position(client_id, {
-                "type": "problem_changed",
-                "problem": True,
-                "message": pos.problem_message,
-            })
             await self._notify_caller_full_state()
 
-    async def clear_problem(self, client_id: str, by_caller: bool = False) -> None:
+    async def clear_attention(self, client_id: str, by_caller: bool = False) -> None:
         async with self._lock:
             pos = self.state.positions.get(client_id)
-            if not pos or not pos.problem:
+            if not pos or not pos.attention:
                 return
-            pos.problem = False
-            pos.problem_message = ""
-            self.log.record("problem_cleared", position=pos.label,
-                            cue=self._current_cue_seq(),
-                            detail="by caller" if by_caller else "by operator")
+            pos.attention = False
+            pos.attention_message = ""
+            self.log.record("attention_cleared", position=pos.label,
+                            detail="caller" if by_caller else "operator")
             self._persist()
-            await self._send_position(client_id, {
-                "type": "problem_changed",
-                "problem": False,
-                "message": "",
-            })
+            if by_caller:
+                # Tell the operator their report was seen
+                await self._send_position(client_id, {"type": "attention_cleared"})
             await self._notify_caller_full_state()
 
-    # --- Show timer ---
+    # --- Show clock ---
 
-    async def start_show(self) -> None:
+    async def start_show_clock(self) -> None:
         async with self._lock:
-            restarted = bool(self.state.show_start_time)
-            self.state.show_start_time = now_iso()
-            self.log.record("show_started", detail="restart" if restarted else "")
+            self.state.show_started_at = time.time()
+            self.log.record("show_started")
             self._persist()
-            await self._broadcast_positions({
-                "type": "show_started",
-                "start_time": self.state.show_start_time,
-            })
+            await self._broadcast_positions({"type": "show_started"})
+            await self._notify_caller_full_state()
+
+    async def clear_show_clock(self) -> None:
+        async with self._lock:
+            if not self.state.show_started_at:
+                return
+            self.state.show_started_at = 0.0
+            self.log.record("show_clock_cleared")
+            self._persist()
             await self._notify_caller_full_state()
 
     # --- Arm / disarm ---
@@ -995,8 +993,8 @@ class StateManager:
             "password_enabled": self.state.password_enabled,
             "password": self.state.password,
             "osc_patch_filename": self.state.osc_patch_filename,
-            "show_start_time": self.state.show_start_time,
-            "last_go_time": self.state.last_go_time,
+            "show_started_at": self.state.show_started_at,
+            "last_go_at": self.state.last_go_at,
         }
 
     def get_full_state_for_observer(self) -> dict[str, Any]:

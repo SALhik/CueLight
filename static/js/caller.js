@@ -38,13 +38,15 @@
     password: "",
     osc_patch_filename: "",
     auto_standby: false,
-    show_start_time: "",
-    last_go_time: "",
+    show_started_at: 0,
+    last_go_at: 0,
   };
+  // Server-vs-device clock skew, measured from heartbeat pings, so the show
+  // clock reads server time even if the iPad's clock drifts.
+  let serverClockOffset = 0;
   let reconnectDelay = 500;
   let lockHoldTimer = null;
   let renamingClientId = null;
-  let problemClientId = null;
   let oscResultTimers = {};
   let exited = false;
 
@@ -108,8 +110,8 @@
         state.password = msg.password || "";
         state.osc_patch_filename = msg.osc_patch_filename || "";
         state.auto_standby = !!msg.auto_standby;
-        state.show_start_time = msg.show_start_time || "";
-        state.last_go_time = msg.last_go_time || "";
+        state.show_started_at = msg.show_started_at || 0;
+        state.last_go_at = msg.last_go_at || 0;
         render();
         break;
 
@@ -118,6 +120,7 @@
         break;
 
       case "ping":
+        serverClockOffset = Date.now() / 1000 - msg.ts;
         send({ type: "pong", ts: msg.ts });
         break;
     }
@@ -142,8 +145,9 @@
     renderGrid();
     renderTransport();
     renderWarnings();
+    renderAttention();
+    renderClock();
     renderLock();
-    renderTimer();
     // Keep the roll-call/health list live while Settings is open
     if (document.getElementById("settingsModal").classList.contains("visible")) {
       renderHealthList();
@@ -162,19 +166,19 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
-      if (pos.problem) col.classList.add("problem");
+      if (pos.attention) col.classList.add("attention");
       col.dataset.clientId = cid;
 
       // Header
       var header = document.createElement("div");
       header.className = "col-header";
       var badgeHtml;
-      if (isOsc) {
+      if (pos.attention) {
+        badgeHtml = '<div class="col-badge attention-badge flashing">⚠ ATTENTION</div>';
+      } else if (isOsc) {
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
-      } else if (pos.problem) {
-        badgeHtml = '<div class="col-badge problem-badge">⚠ PROBLEM</div>';
       } else {
         badgeHtml = '<div class="col-badge"></div>';
       }
@@ -195,13 +199,6 @@
       header.addEventListener("click", function () {
         openRename(cid, pos.label);
       });
-      var problemBadge = header.querySelector(".problem-badge");
-      if (problemBadge) {
-        problemBadge.addEventListener("click", function (e) {
-          e.stopPropagation();
-          openProblem(cid);
-        });
-      }
       col.appendChild(header);
 
       // Standby
@@ -295,6 +292,110 @@
     lockOverlay.classList.toggle("visible", state.locked);
   }
 
+  // --- Operator attention banner ---
+  function renderAttention() {
+    const banner = document.getElementById("attentionBanner");
+    const raised = Object.entries(state.positions).filter(([, p]) => p.attention);
+    banner.innerHTML = "";
+    if (raised.length === 0) {
+      banner.classList.remove("visible");
+      return;
+    }
+    raised.forEach(([cid, pos]) => {
+      const row = document.createElement("div");
+      row.className = "attention-row";
+      row.innerHTML =
+        '<span class="who">⚠ ' + escHtml(pos.label) + "</span>" +
+        (pos.attention_message
+          ? '<span class="msg">' + escHtml(pos.attention_message) + "</span>"
+          : "");
+      const btn = document.createElement("button");
+      btn.textContent = "CLEAR";
+      btn.addEventListener("click", () => {
+        send({ type: "clear_attention", client_id: cid });
+      });
+      row.appendChild(btn);
+      banner.appendChild(row);
+    });
+    banner.classList.add("visible");
+  }
+
+  // --- Show clock ---
+  const clockStrip = document.getElementById("clockStrip");
+  let clockPrefs;
+  try {
+    clockPrefs = JSON.parse(localStorage.getItem("cuelight_clock_prefs")) || {};
+  } catch (e) {
+    clockPrefs = {};
+  }
+  clockPrefs = Object.assign({ time: true, elapsed: true, sinceGo: false }, clockPrefs);
+
+  function saveClockPrefs() {
+    localStorage.setItem("cuelight_clock_prefs", JSON.stringify(clockPrefs));
+  }
+
+  function fmtDur(s) {
+    s = Math.max(0, Math.floor(s));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? h + ":" + String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0")
+      : m + ":" + String(sec).padStart(2, "0");
+  }
+
+  function serverNow() {
+    return Date.now() / 1000 - serverClockOffset;
+  }
+
+  function renderClock() {
+    const parts = [];
+    if (clockPrefs.time) {
+      parts.push(new Date().toLocaleTimeString([], {
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }));
+    }
+    if (clockPrefs.elapsed) {
+      parts.push(state.show_started_at > 0
+        ? "SHOW " + fmtDur(serverNow() - state.show_started_at)
+        : "SHOW --:--");
+    }
+    if (clockPrefs.sinceGo) {
+      parts.push(state.last_go_at > 0
+        ? "GO +" + fmtDur(serverNow() - state.last_go_at)
+        : "GO --");
+    }
+    clockStrip.textContent = parts.length ? parts.join("  ·  ") : "⏱";
+    clockStrip.classList.toggle("running", state.show_started_at > 0);
+  }
+
+  setInterval(renderClock, 1000);
+
+  clockStrip.addEventListener("click", () => {
+    const started = state.show_started_at > 0;
+    document.getElementById("clockStatus").textContent = started
+      ? "Show started at " +
+        new Date(state.show_started_at * 1000).toLocaleTimeString() +
+        " — elapsed " + fmtDur(serverNow() - state.show_started_at)
+      : "Clock not started. START SHOW records the time in the show log and " +
+        "notifies all positions.";
+    document.getElementById("startShowBtn").classList.toggle("hidden", started);
+    document.getElementById("clearClockBtn").classList.toggle("hidden", !started);
+    document.getElementById("clockModal").classList.add("visible");
+  });
+
+  document.getElementById("startShowBtn").addEventListener("click", () => {
+    send({ type: "start_show_clock" });
+    closeModal("clockModal");
+  });
+
+  document.getElementById("clearClockBtn").addEventListener("click", () => {
+    if (confirm("Clear the show clock?")) {
+      send({ type: "clear_show_clock" });
+      closeModal("clockModal");
+    }
+  });
+
   // --- Master buttons ---
   document.getElementById("masterStandby").addEventListener("click", () => {
     if (!state.locked) send({ type: "standby_armed" });
@@ -363,7 +464,7 @@
           const btn = document.getElementById("resumeShowBtn");
           btn.style.display = "";
           btn.addEventListener("click", async () => {
-            const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+            const res = await (await fetch("/api/resume_show", { method: "POST", headers: pwAuth() })).json();
             if (res.ok) location.reload();
           });
           return;
@@ -465,76 +566,6 @@
     if (e.key === "Enter") document.getElementById("renameSaveBtn").click();
   });
 
-  // --- Problem readout ---
-  function openProblem(clientId) {
-    problemClientId = clientId;
-    var pos = state.positions[clientId];
-    if (!pos) return;
-    document.getElementById("problemTitle").textContent = pos.label + " — PROBLEM";
-    document.getElementById("problemMessage").textContent =
-      pos.problem_message || "(no message)";
-    document.getElementById("problemModal").classList.add("visible");
-  }
-
-  document.getElementById("problemClearCallerBtn").addEventListener("click", () => {
-    if (problemClientId) {
-      send({ type: "clear_problem", client_id: problemClientId });
-    }
-    closeModal("problemModal");
-  });
-
-  // --- Show timer + START SHOW ---
-  const showTimer = document.getElementById("showTimer");
-  const TIMER_PREFS_KEY = "cuelight_timer_prefs";
-  let timerPrefs = { elapsed: true, sinceGo: true, clock: false };
-  try {
-    var storedPrefs = JSON.parse(localStorage.getItem(TIMER_PREFS_KEY) || "{}");
-    ["elapsed", "sinceGo", "clock"].forEach(function (k) {
-      if (typeof storedPrefs[k] === "boolean") timerPrefs[k] = storedPrefs[k];
-    });
-  } catch (e) {}
-
-  function saveTimerPrefs() {
-    localStorage.setItem(TIMER_PREFS_KEY, JSON.stringify(timerPrefs));
-  }
-
-  function fmtDuration(ms) {
-    var s = Math.max(0, Math.floor(ms / 1000));
-    var h = Math.floor(s / 3600);
-    var m = Math.floor((s % 3600) / 60);
-    var sec = s % 60;
-    function pad(n) { return (n < 10 ? "0" : "") + n; }
-    return h > 0 ? h + ":" + pad(m) + ":" + pad(sec) : pad(m) + ":" + pad(sec);
-  }
-
-  function renderTimer() {
-    var parts = [];
-    var now = Date.now();
-    if (timerPrefs.elapsed && state.show_start_time) {
-      var start = Date.parse(state.show_start_time);
-      if (!isNaN(start)) parts.push("SHOW " + fmtDuration(now - start));
-    }
-    if (timerPrefs.sinceGo && state.last_go_time) {
-      var lastGo = Date.parse(state.last_go_time);
-      if (!isNaN(lastGo)) parts.push("GO +" + fmtDuration(now - lastGo));
-    }
-    if (timerPrefs.clock) {
-      var d = new Date();
-      function pad2(n) { return (n < 10 ? "0" : "") + n; }
-      parts.push(pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds()));
-    }
-    showTimer.textContent = parts.join(" · ");
-  }
-
-  setInterval(renderTimer, 1000);
-
-  document.getElementById("startShowBtn").addEventListener("click", () => {
-    const prompt = state.show_start_time
-      ? "Restart the show clock? The start time will be re-recorded."
-      : "Start the show clock? All positions get a brief notice.";
-    if (confirm(prompt)) send({ type: "start_show" });
-  });
-
   // --- Settings modal ---
   document.getElementById("settingsBtn").addEventListener("click", async () => {
     await populateSettings();
@@ -594,6 +625,11 @@
 
     document.getElementById("autoStandbyToggle").checked = state.auto_standby;
 
+    // Show clock display preferences (device-local)
+    document.getElementById("clockShowTime").checked = clockPrefs.time;
+    document.getElementById("clockShowElapsed").checked = clockPrefs.elapsed;
+    document.getElementById("clockShowGo").checked = clockPrefs.sinceGo;
+
     // Patches
     try {
       const res = await fetch("/api/patches");
@@ -631,11 +667,6 @@
       }
     } catch (e) {}
 
-    // Timer display preferences (local to this device)
-    document.getElementById("timerElapsedToggle").checked = timerPrefs.elapsed;
-    document.getElementById("timerSinceGoToggle").checked = timerPrefs.sinceGo;
-    document.getElementById("timerClockToggle").checked = timerPrefs.clock;
-
     // Password
     document.getElementById("pwToggle").checked = state.password_enabled;
     document.getElementById("pwValueField").style.display = state.password_enabled ? "flex" : "none";
@@ -663,6 +694,24 @@
     send({ type: "set_auto_standby", enabled: e.target.checked });
   });
 
+  document.getElementById("clockShowTime").addEventListener("change", (e) => {
+    clockPrefs.time = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
+  document.getElementById("clockShowElapsed").addEventListener("change", (e) => {
+    clockPrefs.elapsed = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
+  document.getElementById("clockShowGo").addEventListener("change", (e) => {
+    clockPrefs.sinceGo = e.target.checked;
+    saveClockPrefs();
+    renderClock();
+  });
+
   document.getElementById("loadPatchBtn").addEventListener("click", () => {
     const filename = document.getElementById("patchSelect").value;
     if (filename) {
@@ -683,7 +732,7 @@
   document.getElementById("resumeShowSettingsBtn").addEventListener("click", async () => {
     if (!confirm("Replace the current show with the previous one?")) return;
     try {
-      const res = await (await fetch("/api/resume_show", { method: "POST" })).json();
+      const res = await (await fetch("/api/resume_show", { method: "POST", headers: pwAuth() })).json();
       if (res.ok) closeModal("settingsModal");
     } catch (e) {}
   });
@@ -698,39 +747,53 @@
   });
 
   // --- Show log ---
+  // Protected endpoints want the join password when one is set; the caller
+  // already has it from full_state. It goes in a header, never a query
+  // param — query strings end up in server access logs and browser history.
+  function pwAuth() {
+    return state.password_enabled && state.password
+      ? { "X-CueLight-Password": state.password }
+      : {};
+  }
+
+  // The tab must be opened synchronously — Safari's popup blocker only
+  // allows window.open inside the tap gesture, not after an await.
+  async function viewAuthed(path) {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    try {
+      const res = await fetch(path, { headers: pwAuth() });
+      if (!res.ok) throw new Error(res.status);
+      const text = await res.text();
+      win.location = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    } catch (e) {
+      win.close();
+    }
+  }
+
+  async function downloadAuthed(path, filename) {
+    try {
+      const res = await fetch(path, { headers: pwAuth() });
+      if (!res.ok) return;
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {}
+  }
+
   document.getElementById("downloadLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog?format=csv");
+    downloadAuthed("/api/showlog?format=csv", "showlog.csv");
   });
 
   document.getElementById("viewLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog");
+    viewAuthed("/api/showlog");
   });
 
   document.getElementById("showReportBtn").addEventListener("click", () => {
-    window.open("/api/showreport");
-  });
-
-  document.getElementById("showReportCsvBtn").addEventListener("click", () => {
-    window.open("/api/showreport?format=csv");
-  });
-
-  // --- Timer display preferences ---
-  document.getElementById("timerElapsedToggle").addEventListener("change", (e) => {
-    timerPrefs.elapsed = e.target.checked;
-    saveTimerPrefs();
-    renderTimer();
-  });
-
-  document.getElementById("timerSinceGoToggle").addEventListener("change", (e) => {
-    timerPrefs.sinceGo = e.target.checked;
-    saveTimerPrefs();
-    renderTimer();
-  });
-
-  document.getElementById("timerClockToggle").addEventListener("change", (e) => {
-    timerPrefs.clock = e.target.checked;
-    saveTimerPrefs();
-    renderTimer();
+    viewAuthed("/api/showreport?format=txt");
   });
 
   document.getElementById("pwToggle").addEventListener("change", (e) => {
@@ -791,7 +854,7 @@
   document.getElementById("closeSettings").addEventListener("click", () => closeModal("settingsModal"));
   document.getElementById("closeJump").addEventListener("click", () => closeModal("jumpModal"));
   document.getElementById("closeRename").addEventListener("click", () => closeModal("renameModal"));
-  document.getElementById("closeProblem").addEventListener("click", () => closeModal("problemModal"));
+  document.getElementById("closeClock").addEventListener("click", () => closeModal("clockModal"));
 
   // Close modals on overlay click
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {

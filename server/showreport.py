@@ -1,8 +1,3 @@
-"""Post-show report, computed on demand from the show log.
-
-Nothing here is persisted: the report is derived from the in-memory log
-entries (which mirror state/showlog.jsonl) every time it is requested.
-"""
 from __future__ import annotations
 
 import csv
@@ -10,6 +5,17 @@ import html
 import io
 from datetime import datetime
 from typing import Any
+
+# Characters that spreadsheet apps interpret as formula prefixes
+_DANGEROUS = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _safe(value: object) -> object:
+    """Prefix formula-triggering cells with a single quote so they are treated
+    as plain text by Excel, Google Sheets, etc."""
+    if isinstance(value, str) and value[:1] in _DANGEROUS:
+        return "'" + value
+    return value
 
 
 def _parse_time(value: str) -> datetime | None:
@@ -19,241 +25,294 @@ def _parse_time(value: str) -> datetime | None:
         return None
 
 
-def compute_report(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregates the log into report data.
+def build_report(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Computes a post-show report from the show log. Pure — reads the
+    entries, stores nothing."""
+    show: dict[str, Any] = {
+        "started": "",
+        "ended": "",
+        "duration_s": None,
+        "standbys_called": 0,
+        "gos_called": 0,
+        "master_gos": 0,
+        "cue_advances": 0,
+        "attention_raised": 0,
+    }
+    positions: dict[str, dict[str, Any]] = {}
+    # position -> {"standby": ts, "go": ts} of the latest unacked call
+    pending: dict[str, dict[str, datetime]] = {}
+    cue_gaps: list[dict[str, Any]] = []
+    prev_master_go: tuple[datetime, str] | None = None
 
-    Standby latency: each standby_called opens a pending window for that
-    position; the next standby_acked closes it. A go_called auto-clears a
-    pending standby (server behavior), so it counts as never-acked. A
-    re-called standby restarts the window without counting the first one.
-    """
-    latencies: list[dict[str, Any]] = []
-    unacked: list[dict[str, str]] = []
-    pending: dict[str, tuple[datetime, str, bool]] = {}
-    go_times: list[tuple[datetime, str]] = []
-    auto_standbys = 0
-    manual_standbys = 0
-    joins: dict[str, dict[str, int]] = {}
-    problems: list[dict[str, str]] = []
-    show_started: list[str] = []
+    def pos_stats(label: str) -> dict[str, Any]:
+        if label not in positions:
+            positions[label] = {
+                "standbys": 0, "standby_acks": 0, "standby_ack_latencies": [],
+                "gos": 0, "go_acks": 0, "go_ack_latencies": [],
+                "attention": 0, "osc_fires": 0,
+            }
+        return positions[label]
+
+    first_time: datetime | None = None
+    last_time: datetime | None = None
+    show_started: datetime | None = None
 
     for e in entries:
         t = _parse_time(e.get("time", ""))
+        label = e.get("position", "")
         event = e.get("event", "")
-        position = e.get("position", "")
-        cue = e.get("cue", "")
-        detail = e.get("detail", "")
+        if t:
+            first_time = first_time or t
+            last_time = t
 
-        if event == "standby_called":
-            if detail == "auto":
-                auto_standbys += 1
-            else:
-                manual_standbys += 1
-            if t is not None:
-                pending[position] = (t, cue, detail == "auto")
-        elif event == "standby_acked":
-            opened = pending.pop(position, None)
-            if opened and t is not None:
-                latencies.append({
-                    "position": position,
-                    "cue": opened[1],
-                    "ms": (t - opened[0]).total_seconds() * 1000,
-                    "auto": opened[2],
-                })
-        elif event == "go_called":
-            opened = pending.pop(position, None)
-            if opened:
-                unacked.append({"position": position, "cue": opened[1]})
-        elif event == "master_go" and t is not None:
-            go_times.append((t, cue))
-        elif event == "position_joined":
-            joins.setdefault(position, {"joins": 0, "disconnects": 0})["joins"] += 1
-        elif event == "position_disconnected":
-            joins.setdefault(position, {"joins": 0, "disconnects": 0})["disconnects"] += 1
-        elif event == "problem_raised":
-            problems.append({
-                "time": e.get("time", ""),
-                "position": position,
-                "cue": cue,
-                "message": detail,
-                "cleared": "",
-            })
-        elif event == "problem_cleared":
-            for p in reversed(problems):
-                if p["position"] == position and not p["cleared"]:
-                    p["cleared"] = detail
-                    break
-        elif event == "show_started":
-            show_started.append(e.get("time", ""))
+        if event == "show_started" and t:
+            show_started = t
+        elif event == "standby_called" and label:
+            show["standbys_called"] += 1
+            pos_stats(label)["standbys"] += 1
+            if t:
+                pending.setdefault(label, {})["standby"] = t
+        elif event == "go_called" and label:
+            show["gos_called"] += 1
+            pos_stats(label)["gos"] += 1
+            if t:
+                pending.setdefault(label, {})["go"] = t
+        elif event in ("standby_acked", "go_acked") and label:
+            kind = "standby" if event == "standby_acked" else "go"
+            stats = pos_stats(label)
+            stats[f"{kind}_acks"] += 1
+            called_at = pending.get(label, {}).pop(kind, None)
+            if t and called_at:
+                stats[f"{kind}_ack_latencies"].append((t - called_at).total_seconds())
+        elif event == "master_go":
+            show["master_gos"] += 1
+            if t:
+                if prev_master_go:
+                    cue_gaps.append({
+                        "cue": prev_master_go[1],
+                        "gap_s": round((t - prev_master_go[0]).total_seconds(), 1),
+                    })
+                prev_master_go = (t, e.get("cue", ""))
+        elif event == "cue_advanced":
+            show["cue_advances"] += 1
+        elif event == "attention_raised" and label:
+            show["attention_raised"] += 1
+            pos_stats(label)["attention"] += 1
+        elif event == "osc_fired" and label:
+            pos_stats(label)["osc_fires"] += 1
 
-    # Standbys still pending when the log ends were never acknowledged
-    for position, (_, cue, _) in pending.items():
-        unacked.append({"position": position, "cue": cue})
+    start = show_started or first_time
+    if start:
+        show["started"] = start.isoformat(timespec="seconds")
+    if last_time:
+        show["ended"] = last_time.isoformat(timespec="seconds")
+    if start and last_time:
+        show["duration_s"] = round((last_time - start).total_seconds(), 1)
 
-    per_position: dict[str, dict[str, float]] = {}
-    for lat in latencies:
-        stats = per_position.setdefault(lat["position"], {"count": 0, "min": 0.0, "max": 0.0, "sum": 0.0})
-        ms = lat["ms"]
-        if stats["count"] == 0:
-            stats["min"] = stats["max"] = ms
-        else:
-            stats["min"] = min(stats["min"], ms)
-            stats["max"] = max(stats["max"], ms)
-        stats["count"] += 1
-        stats["sum"] += ms
-    position_stats = [
-        {
-            "position": pos,
-            "count": int(s["count"]),
-            "min_ms": s["min"],
-            "avg_ms": s["sum"] / s["count"],
-            "max_ms": s["max"],
-        }
-        for pos, s in per_position.items()
-    ]
-
-    go_intervals = [
-        {"cue": go_times[i][1], "seconds": (go_times[i + 1][0] - go_times[i][0]).total_seconds()}
-        for i in range(len(go_times) - 1)
-    ]
+    # Collapse latency lists into avg/max
+    for stats in positions.values():
+        for kind in ("standby", "go"):
+            lat = stats.pop(f"{kind}_ack_latencies")
+            stats[f"{kind}_ack_avg_s"] = round(sum(lat) / len(lat), 2) if lat else None
+            stats[f"{kind}_ack_max_s"] = round(max(lat), 2) if lat else None
 
     return {
-        "show_started": show_started,
-        "latencies": latencies,
-        "position_stats": position_stats,
-        "unacked": unacked,
-        "go_intervals": go_intervals,
-        "auto_standbys": auto_standbys,
-        "manual_standbys": manual_standbys,
-        "joins": joins,
-        "problems": problems,
-        "entry_count": len(entries),
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "show": show,
+        "positions": positions,
+        "cue_gaps": cue_gaps,
     }
 
 
-def _fmt_ms(ms: float) -> str:
-    return f"{ms:.0f}"
+def _fmt_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "—"
+    s = int(seconds)
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
-def report_html(entries: list[dict[str, Any]]) -> str:
-    r = compute_report(entries)
-    esc = html.escape
+def _fmt_seconds(value: float | None) -> str:
+    """Seconds with unit, or a bare em-dash when there is no value."""
+    return "—" if value is None else f"{value}s"
 
-    def table(headers: list[str], rows: list[list[str]], empty: str) -> str:
-        if not rows:
-            return f'<p class="empty">{esc(empty)}</p>'
-        head = "".join(f"<th>{esc(h)}</th>" for h in headers)
-        body = "".join(
-            "<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in rows
+
+def report_to_text(report: dict[str, Any]) -> str:
+    """Renders the report as a plain-text page a stage manager can save or print."""
+    show = report["show"]
+    lines = [
+        "CUELIGHT SHOW REPORT",
+        f"generated {report['generated_at']}",
+        "",
+        f"  started    {show['started'] or '—'}",
+        f"  ended      {show['ended'] or '—'}",
+        f"  duration   {_fmt_duration(show['duration_s'])}",
+        f"  master GOs {show['master_gos']}   cue advances {show['cue_advances']}",
+        f"  standbys   {show['standbys_called']}   GOs {show['gos_called']}"
+        f"   attention {show['attention_raised']}",
+        "",
+        "POSITIONS",
+    ]
+    if not report["positions"]:
+        lines.append("  (none)")
+    for label, s in report["positions"].items():
+        lines.append(f"  {label}")
+        lines.append(
+            f"    standbys {s['standbys']} (acked {s['standby_acks']}"
+            f", avg {_fmt_seconds(s['standby_ack_avg_s'])}"
+            f", max {_fmt_seconds(s['standby_ack_max_s'])})"
         )
-        return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
-
-    started = ", ".join(esc(t) for t in r["show_started"]) or "never (START SHOW not pressed)"
-    stats_rows = [
-        [s["position"], str(s["count"]), _fmt_ms(s["min_ms"]), _fmt_ms(s["avg_ms"]), _fmt_ms(s["max_ms"])]
-        for s in sorted(r["position_stats"], key=lambda s: s["position"].lower())
-    ]
-    latency_rows = [
-        [lat["position"], lat["cue"] or "—", _fmt_ms(lat["ms"]), "auto" if lat["auto"] else "manual"]
-        for lat in r["latencies"]
-    ]
-    unacked_rows = [[u["position"], u["cue"] or "—"] for u in r["unacked"]]
-    go_rows = [[g["cue"] or "—", f"{g['seconds']:.1f}"] for g in r["go_intervals"]]
-    join_rows = [
-        [pos, str(c["joins"]), str(c["disconnects"])]
-        for pos, c in sorted(r["joins"].items(), key=lambda kv: kv[0].lower())
-    ]
-    problem_rows = [
-        [p["time"], p["position"], p["cue"] or "—", p["message"] or "(no message)",
-         (f"cleared {p['cleared']}" if p["cleared"] else "not cleared")]
-        for p in r["problems"]
-    ]
-
-    body = f"""
-<h1>CueLight Show Report</h1>
-<p class="meta">Show started: {started} · {r["entry_count"]} log entries</p>
-
-<h2>Standby response per position</h2>
-<p class="hint">Time from a standby being called to the operator acknowledging it.</p>
-{table(["Position", "Acks", "Min (ms)", "Avg (ms)", "Max (ms)"], stats_rows, "No acknowledged standbys.")}
-
-<h2>Standby response per cue</h2>
-{table(["Position", "Cue", "Latency (ms)", "Called"], latency_rows, "No acknowledged standbys.")}
-
-<h2>Standbys never acknowledged</h2>
-{table(["Position", "Cue"], unacked_rows, "None — every standby was acknowledged.")}
-
-<h2>Time between GOs</h2>
-<p class="hint">Elapsed time from each master GO to the next, labelled with the cue it fired.</p>
-{table(["Cue", "Seconds to next GO"], go_rows, "Fewer than two master GOs fired.")}
-
-<h2>Standby calls</h2>
-{table(["Manual", "Auto"], [[str(r["manual_standbys"]), str(r["auto_standbys"])]], "")}
-
-<h2>Joins and disconnects</h2>
-{table(["Position", "Joins", "Disconnects"], join_rows, "No positions joined.")}
-
-<h2>Problems raised</h2>
-{table(["Time", "Position", "Cue", "Message", "Status"], problem_rows, "No problems raised.")}
-"""
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CueLight Show Report</title>
-<style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-       margin: 32px auto; max-width: 860px; padding: 0 16px; color: #222; }}
-h1 {{ font-size: 24px; }}
-h2 {{ font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }}
-table {{ border-collapse: collapse; margin-top: 8px; width: 100%; }}
-th, td {{ text-align: left; padding: 4px 10px; border-bottom: 1px solid #eee; font-size: 13px; }}
-th {{ color: #666; font-weight: 600; }}
-.meta {{ color: #666; font-size: 13px; }}
-.hint {{ color: #888; font-size: 12px; margin: 2px 0; }}
-.empty {{ color: #999; font-size: 13px; font-style: italic; }}
-</style>
-</head>
-<body>{body}</body>
-</html>
-"""
+        lines.append(
+            f"    GOs      {s['gos']} (acked {s['go_acks']}"
+            f", avg {_fmt_seconds(s['go_ack_avg_s'])}"
+            f", max {_fmt_seconds(s['go_ack_max_s'])})"
+        )
+        if s["osc_fires"]:
+            lines.append(f"    OSC fires {s['osc_fires']}")
+        if s["attention"]:
+            lines.append(f"    attention raised {s['attention']}")
+    if report["cue_gaps"]:
+        lines.append("")
+        lines.append("TIME BETWEEN MASTER GOs")
+        for g in report["cue_gaps"]:
+            cue = f"after cue {g['cue']}" if g["cue"] else "(no cue)"
+            lines.append(f"  {cue:<16} {_fmt_duration(g['gap_s'])}")
+    lines.append("")
+    return "\n".join(lines)
 
 
-def report_csv(entries: list[dict[str, Any]]) -> str:
-    """Flat 5-column CSV: section,position,cue,metric,value."""
-    r = compute_report(entries)
+def _str(v: object) -> str:
+    """Render a value as a string, using '—' for None."""
+    return "—" if v is None else str(v)
+
+
+def report_to_csv(report: dict[str, Any]) -> str:
+    """Renders the report as a CSV attachment safe against formula-injection.
+
+    Columns: section, label, metric, value.
+    Every cell is passed through _safe() to neutralise spreadsheet formula prefixes.
+    """
+    show = report["show"]
     buf = io.StringIO()
     writer = csv.writer(buf)
 
-    _DANGEROUS = ("=", "+", "-", "@", "\t", "\r")
+    def row(*cells: object) -> None:
+        writer.writerow([_safe(str(c) if not isinstance(c, str) else c) for c in cells])
 
-    def _safe(row):
-        return ["'" + v if isinstance(v, str) and v[:1] in _DANGEROUS else v for v in row]
+    row("section", "label", "metric", "value")
 
-    def write(row):
-        writer.writerow(_safe(row))
+    # Show summary
+    row("show_summary", "", "generated_at", report["generated_at"])
+    row("show_summary", "", "started", show["started"] or "—")
+    row("show_summary", "", "ended", show["ended"] or "—")
+    row("show_summary", "", "duration", _fmt_duration(show["duration_s"]))
+    row("show_summary", "", "standbys_called", show["standbys_called"])
+    row("show_summary", "", "gos_called", show["gos_called"])
+    row("show_summary", "", "master_gos", show["master_gos"])
+    row("show_summary", "", "cue_advances", show["cue_advances"])
+    row("show_summary", "", "attention_raised", show["attention_raised"])
 
-    write(["section", "position", "cue", "metric", "value"])
-    for t in r["show_started"]:
-        write(["show_started", "", "", "time", t])
-    for s in r["position_stats"]:
-        write(["standby_latency", s["position"], "", "count", s["count"]])
-        write(["standby_latency", s["position"], "", "min_ms", _fmt_ms(s["min_ms"])])
-        write(["standby_latency", s["position"], "", "avg_ms", _fmt_ms(s["avg_ms"])])
-        write(["standby_latency", s["position"], "", "max_ms", _fmt_ms(s["max_ms"])])
-    for lat in r["latencies"]:
-        write(["standby_latency_per_cue", lat["position"], lat["cue"],
-               "auto" if lat["auto"] else "manual", _fmt_ms(lat["ms"])])
-    for u in r["unacked"]:
-        write(["unacked_standby", u["position"], u["cue"], "", ""])
-    for g in r["go_intervals"]:
-        write(["go_interval", "", g["cue"], "seconds", f"{g['seconds']:.1f}"])
-    write(["standby_counts", "", "", "manual", r["manual_standbys"]])
-    write(["standby_counts", "", "", "auto", r["auto_standbys"]])
-    for pos, c in r["joins"].items():
-        write(["join_summary", pos, "", "joins", c["joins"]])
-        write(["join_summary", pos, "", "disconnects", c["disconnects"]])
-    for p in r["problems"]:
-        write(["problem", p["position"], p["cue"], p["cleared"] or "not cleared", p["message"]])
+    # Per-position stats
+    for label, s in report["positions"].items():
+        row("position", label, "standbys", s["standbys"])
+        row("position", label, "standby_acks", s["standby_acks"])
+        row("position", label, "standby_ack_avg_s", _str(s["standby_ack_avg_s"]))
+        row("position", label, "standby_ack_max_s", _str(s["standby_ack_max_s"]))
+        row("position", label, "gos", s["gos"])
+        row("position", label, "go_acks", s["go_acks"])
+        row("position", label, "go_ack_avg_s", _str(s["go_ack_avg_s"]))
+        row("position", label, "go_ack_max_s", _str(s["go_ack_max_s"]))
+        if s["osc_fires"]:
+            row("position", label, "osc_fires", s["osc_fires"])
+        if s["attention"]:
+            row("position", label, "attention_raised", s["attention"])
+
+    # Cue gaps
+    for g in report["cue_gaps"]:
+        cue_label = f"after cue {g['cue']}" if g["cue"] else "(no cue)"
+        row("cue_gap", cue_label, "gap_s", g["gap_s"])
+
     return buf.getvalue()
+
+
+def report_to_html(report: dict[str, Any]) -> str:
+    """Renders the report as a self-contained HTML page (dark theme, no external deps)."""
+    show = report["show"]
+    esc = html.escape
+
+    def th(*headers: str) -> str:
+        return "<tr>" + "".join(f"<th>{esc(h)}</th>" for h in headers) + "</tr>"
+
+    def td(*cells: object) -> str:
+        return "<tr>" + "".join(f"<td>{esc(str(c))}</td>" for c in cells) + "</tr>"
+
+    def table(header_row: str, body_rows: list[str]) -> str:
+        body = "\n".join(body_rows) if body_rows else '<tr><td class="empty" colspan="99">(none)</td></tr>'
+        return f"<table>\n<thead>{header_row}</thead>\n<tbody>{body}</tbody>\n</table>"
+
+    # Show summary section
+    summary_rows = [
+        td("Generated", report["generated_at"]),
+        td("Started", show["started"] or "—"),
+        td("Ended", show["ended"] or "—"),
+        td("Duration", _fmt_duration(show["duration_s"])),
+        td("Standbys called", show["standbys_called"]),
+        td("GOs called", show["gos_called"]),
+        td("Master GOs", show["master_gos"]),
+        td("Cue advances", show["cue_advances"]),
+        td("Attention raised", show["attention_raised"]),
+    ]
+    summary_tbl = table(th("Metric", "Value"), summary_rows)
+
+    # Positions section
+    pos_rows = []
+    for label, s in report["positions"].items():
+        pos_rows.append(td(
+            label,
+            s["standbys"], s["standby_acks"],
+            _fmt_seconds(s["standby_ack_avg_s"]), _fmt_seconds(s["standby_ack_max_s"]),
+            s["gos"], s["go_acks"],
+            _fmt_seconds(s["go_ack_avg_s"]), _fmt_seconds(s["go_ack_max_s"]),
+            s["osc_fires"], s["attention"],
+        ))
+    pos_tbl = table(
+        th("Position",
+           "Standbys", "Acked", "SB avg", "SB max",
+           "GOs", "GO acked", "GO avg", "GO max",
+           "OSC fires", "Attention"),
+        pos_rows,
+    )
+
+    # Cue gaps section
+    gap_rows = [
+        td(f"after cue {g['cue']}" if g["cue"] else "(no cue)", _fmt_duration(g["gap_s"]))
+        for g in report["cue_gaps"]
+    ]
+    gap_tbl = table(th("Cue", "Gap"), gap_rows)
+
+    css = """
+body{background:#1a1a1a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+     margin:32px auto;max-width:960px;padding:0 16px}
+h1{font-size:22px;color:#fff}
+h2{font-size:14px;color:#aaa;margin-top:28px;border-bottom:1px solid #333;padding-bottom:4px}
+table{border-collapse:collapse;margin-top:8px;width:100%}
+th,td{text-align:left;padding:5px 10px;border-bottom:1px solid #2e2e2e;font-size:13px}
+th{color:#888;font-weight:600}
+.empty{color:#555;font-style:italic}
+"""
+
+    body = f"""<h1>CueLight Show Report</h1>
+<h2>Summary</h2>
+{summary_tbl}
+<h2>Positions</h2>
+{pos_tbl}
+<h2>Time Between Master GOs</h2>
+{gap_tbl}
+"""
+    return (
+        f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+        f'<meta charset="UTF-8">\n'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">\n'
+        f"<title>CueLight Show Report</title>\n"
+        f"<style>{css}</style>\n"
+        f"</head>\n<body>\n{body}</body>\n</html>\n"
+    )

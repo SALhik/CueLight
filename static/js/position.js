@@ -18,10 +18,6 @@
   const lockOverlay = document.getElementById("lockOverlay");
   const noteDisplay = document.getElementById("noteDisplay");
   const flashOverlay = document.getElementById("flashOverlay");
-  const showBanner = document.getElementById("showBanner");
-  const problemPanel = document.getElementById("problemPanel");
-  const problemBtn = document.getElementById("problemBtn");
-  const problemInput = document.getElementById("problemInput");
 
   let ws = null;
   let standbyState = "idle";
@@ -53,9 +49,9 @@
       case "joined":
         document.getElementById("labelDisplay").textContent = msg.label;
         applyColor(msg.color || "");
+        setAttention(!!msg.attention);
         setStandby(msg.standby);
         setGo(msg.go);
-        setProblem(!!msg.problem);
         toggleLock(msg.locked);
         callerWarning.classList.toggle("visible", !msg.caller_connected);
         if (msg.scene) sceneDisplay.textContent = `Scene ${msg.scene}`;
@@ -74,25 +70,15 @@
 
       case "standby_called":
         hideFlash();
-        hideProblemPanel();
         setStandby("called");
-        alertStandby();
+        cueAlert("standby");
         break;
 
       case "go_called":
         hideFlash();
-        hideProblemPanel();
         setStandby("idle");
         setGo("called");
-        alertGo();
-        break;
-
-      case "problem_changed":
-        setProblem(!!msg.problem);
-        break;
-
-      case "show_started":
-        showStartBanner();
+        cueAlert("go");
         break;
 
       case "flash":
@@ -120,6 +106,15 @@
         sceneDisplay.textContent = msg.scene ? `Scene ${msg.scene}` : "";
         cueDisplay.textContent = msg.cue_number || "";
         showNote(msg.note || "");
+        break;
+
+      case "attention_cleared":
+        setAttention(false);
+        showToast("✓ Seen by caller");
+        break;
+
+      case "show_started":
+        showToast("⏱ Show clock started");
         break;
 
       case "caller_disconnected":
@@ -214,138 +209,6 @@
     location.href = "/join";
   });
 
-  // --- Problem signal ---
-  let problemActive = false;
-  let bannerTimer = null;
-
-  function setProblem(active) {
-    problemActive = active;
-    problemBtn.classList.toggle("active", active);
-    problemPanel.classList.toggle("active", active);
-    if (!active) hideProblemPanel();
-  }
-
-  function hideProblemPanel() {
-    problemPanel.classList.remove("visible");
-  }
-
-  function raiseProblem(message) {
-    ws.send(JSON.stringify({ type: "raise_problem", message: (message || "").slice(0, 60) }));
-    hideProblemPanel();
-    problemInput.value = "";
-    problemInput.blur();
-  }
-
-  problemBtn.addEventListener("click", () => {
-    problemPanel.classList.toggle("visible");
-  });
-
-  problemPanel.querySelectorAll(".problem-preset").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      raiseProblem(btn.dataset.msg);
-    });
-  });
-
-  document.getElementById("problemRaiseBtn").addEventListener("click", () => {
-    raiseProblem(problemInput.value.trim());
-  });
-
-  document.getElementById("problemClearBtn").addEventListener("click", () => {
-    ws.send(JSON.stringify({ type: "clear_problem" }));
-    hideProblemPanel();
-  });
-
-  // --- Show started notice (transient, non-blocking) ---
-  function showStartBanner() {
-    showBanner.classList.add("visible");
-    if (bannerTimer) clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => {
-      showBanner.classList.remove("visible");
-      bannerTimer = null;
-    }, 4000);
-  }
-
-  // --- Operator alerts: beep + vibration on incoming cues (opt-in) ---
-  // WebAudio needs a user gesture to start (same constraint as keepawake),
-  // so the context is created/resumed on taps while alerts are on.
-  // navigator.vibrate is Android-only; iOS relies on the beep.
-  const alertBtn = document.getElementById("alertBtn");
-  let alertsOn = localStorage.getItem("cuelight_alerts") === "on";
-  let audioCtx = null;
-
-  function ensureAudio() {
-    var AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    if (!audioCtx) {
-      try { audioCtx = new AC(); } catch (e) { return; }
-    }
-    if (audioCtx.state === "suspended") audioCtx.resume().catch(function () {});
-  }
-
-  function beepAt(t, freq, dur) {
-    var osc = audioCtx.createOscillator();
-    var gain = audioCtx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.4, t + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start(t);
-    osc.stop(t + dur + 0.05);
-  }
-
-  function vibrate(pattern) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) {}
-    }
-  }
-
-  function alertStandby() {
-    if (!alertsOn) return;
-    vibrate([120, 90, 120]);
-    if (audioCtx && audioCtx.state === "running") {
-      var t = audioCtx.currentTime;
-      beepAt(t, 880, 0.12);       // two short beeps = standby
-      beepAt(t + 0.22, 880, 0.12);
-    }
-  }
-
-  function alertGo() {
-    if (!alertsOn) return;
-    vibrate([400]);
-    if (audioCtx && audioCtx.state === "running") {
-      beepAt(audioCtx.currentTime, 587, 0.45); // one long beep = GO
-    }
-  }
-
-  function applyAlerts() {
-    alertBtn.textContent = alertsOn ? "ALERT: ON" : "ALERT";
-    alertBtn.classList.toggle("active", alertsOn);
-    localStorage.setItem("cuelight_alerts", alertsOn ? "on" : "off");
-  }
-
-  alertBtn.addEventListener("click", () => {
-    alertsOn = !alertsOn;
-    applyAlerts();
-    if (alertsOn) {
-      // This tap is the unlock gesture; a soft blip confirms sound works.
-      // resume() is async, so chain the confirmation beep off its promise.
-      ensureAudio();
-      Promise.resolve(audioCtx && audioCtx.resume ? audioCtx.resume() : null).then(function () {
-        if (audioCtx && audioCtx.state === "running") {
-          beepAt(audioCtx.currentTime, 880, 0.08);
-        }
-      });
-    }
-  });
-
-  document.addEventListener("touchend", function () { if (alertsOn) ensureAudio(); }, true);
-  document.addEventListener("click", function () { if (alertsOn) ensureAudio(); }, true);
-
-  applyAlerts();
-
   // --- Running-mode dimming (cycles off → dim → red → off) ---
   const dimOverlay = document.getElementById("dimOverlay");
   const dimBtn = document.getElementById("dimBtn");
@@ -354,7 +217,8 @@
   if (DIM_MODES.indexOf(dimMode) === -1) dimMode = "off";
 
   function applyDim() {
-    dimOverlay.className = "dim-overlay" + (dimMode === "off" ? "" : " " + dimMode);
+    dimOverlay.classList.toggle("dim", dimMode === "dim");
+    dimOverlay.classList.toggle("red", dimMode === "red");
     dimBtn.textContent =
       dimMode === "off" ? "DIM" : dimMode === "dim" ? "DIM: ON" : "DIM: RED";
     localStorage.setItem("cuelight_dim_mode", dimMode);
@@ -366,6 +230,149 @@
   });
 
   applyDim();
+
+  // --- Toast (transient feedback: "seen by caller", show clock) ---
+  const toast = document.getElementById("toast");
+  let toastTimer = null;
+
+  function showToast(text) {
+    toast.textContent = text;
+    toast.classList.add("visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("visible"), 3000);
+  }
+
+  // --- Cue alert: optional beep + vibrate on standby/GO (off by default) ---
+  // WebAudio needs a user gesture to start on iOS; the toggle tap (or the
+  // first tap on the page when re-enabled from a previous session) arms it.
+  const alertBtn = document.getElementById("alertBtn");
+  let alertOn = localStorage.getItem("cuelight_alert_mode") === "on";
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === "suspended") {
+      // resume() is async; callers must wait for it or the first beep
+      // after enabling alerts lands while the context is still suspended
+      return audioCtx.resume().catch(() => {});
+    }
+    return Promise.resolve();
+  }
+
+  function beep(freq, dur, delay) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    const t = audioCtx.currentTime + delay;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+
+  function cueAlert(kind) {
+    if (!alertOn) return;
+    ensureAudio().then(() => {
+      if (!audioCtx || audioCtx.state !== "running") return;
+      if (kind === "standby") {
+        beep(880, 0.15, 0);
+        beep(880, 0.15, 0.22);
+      } else {
+        beep(660, 0.25, 0);
+      }
+    });
+    if (navigator.vibrate) {
+      try { navigator.vibrate(kind === "standby" ? [200, 100, 200] : 300); } catch (e) {}
+    }
+  }
+
+  function applyAlert() {
+    alertBtn.textContent = alertOn ? "ALERT: ON" : "ALERT";
+    alertBtn.classList.toggle("active", alertOn);
+    localStorage.setItem("cuelight_alert_mode", alertOn ? "on" : "off");
+  }
+
+  alertBtn.addEventListener("click", () => {
+    alertOn = !alertOn;
+    if (alertOn) ensureAudio();
+    applyAlert();
+  });
+
+  // Persistent, not { once: true }: iOS suspends the AudioContext on audio
+  // interruptions (calls, Siri) and resume() outside a user gesture can be
+  // rejected, so every tap must be able to re-arm it.
+  document.addEventListener("pointerdown", () => {
+    if (alertOn) ensureAudio();
+  });
+
+  applyAlert();
+
+  // --- Attention: report a problem to the caller ---
+  const attentionBtn = document.getElementById("attentionBtn");
+  const attentionPanel = document.getElementById("attentionPanel");
+  const attentionTitle = document.getElementById("attentionTitle");
+  const attentionPresets = document.getElementById("attentionPresets");
+  const attentionInput = document.getElementById("attentionInput");
+  const attentionSendBtn = document.getElementById("attentionSendBtn");
+  const attentionWithdrawBtn = document.getElementById("attentionWithdrawBtn");
+  let attentionRaised = false;
+
+  function setAttention(raised) {
+    attentionRaised = raised;
+    attentionBtn.classList.toggle("raised", raised);
+  }
+
+  function openAttentionPanel() {
+    attentionTitle.textContent = attentionRaised
+      ? "Report sent — waiting for caller"
+      : "Report a problem to the caller";
+    attentionPresets.classList.toggle("hidden", attentionRaised);
+    attentionInput.classList.toggle("hidden", attentionRaised);
+    attentionSendBtn.classList.toggle("hidden", attentionRaised);
+    attentionWithdrawBtn.classList.toggle("hidden", !attentionRaised);
+    attentionPanel.classList.add("visible");
+  }
+
+  function closeAttentionPanel() {
+    attentionPanel.classList.remove("visible");
+  }
+
+  function raiseAttention(message) {
+    ws.send(JSON.stringify({ type: "raise_attention", message: message || "" }));
+    setAttention(true);
+    attentionInput.value = "";
+    closeAttentionPanel();
+  }
+
+  attentionBtn.addEventListener("click", openAttentionPanel);
+  document.getElementById("lockAttentionBtn").addEventListener("click", openAttentionPanel);
+  document.getElementById("attentionCancelBtn").addEventListener("click", closeAttentionPanel);
+
+  attentionPresets.querySelectorAll(".preset-chip").forEach((chip) => {
+    chip.addEventListener("click", () => raiseAttention(chip.textContent));
+  });
+
+  attentionSendBtn.addEventListener("click", () => {
+    raiseAttention(attentionInput.value.trim());
+  });
+
+  attentionWithdrawBtn.addEventListener("click", () => {
+    ws.send(JSON.stringify({ type: "clear_attention" }));
+    setAttention(false);
+    closeAttentionPanel();
+  });
+
+  attentionPanel.addEventListener("click", (e) => {
+    if (e.target === attentionPanel) closeAttentionPanel();
+  });
 
   connect();
 })();

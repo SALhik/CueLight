@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from threading import Timer
 
@@ -62,8 +63,15 @@ def load_state() -> AppState:
     state.auto_standby = data.get("auto_standby", False)
     state.osc_patch_filename = data.get("osc_patch_filename", "")
     state.showfile_filename = data.get("showfile_filename", "")
-    state.show_start_time = data.get("show_start_time", "")
-    state.last_go_time = data.get("last_go_time", "")
+    # last_go_at is deliberately transient; the show clock survives restarts
+    state.show_started_at = data.get("show_started_at", 0.0)
+    if not state.show_started_at and data.get("show_start_time"):
+        # Pre-rename snapshots stored the clock as an ISO string
+        try:
+            state.show_started_at = datetime.fromisoformat(
+                data["show_start_time"]).timestamp()
+        except (TypeError, ValueError):
+            pass
 
     for cid, pdata in data.get("positions", {}).items():
         state.positions[cid] = Position(
@@ -77,8 +85,6 @@ def load_state() -> AppState:
             latency_ms=0.0,
             cue_indicator=pdata.get("cue_indicator", ""),
             color=pdata.get("color", ""),
-            problem=pdata.get("problem", False),
-            problem_message=pdata.get("problem_message", ""),
         )
 
     # Showfile is reloaded from disk by the showfile module, not from snapshot

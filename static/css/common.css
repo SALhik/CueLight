@@ -19,9 +19,10 @@
   --grey: #555;
   --osc-accent: #2a6a8a;
   --osc-accent-dim: #1a3a4a;
-  /* Problem signal: orange — distinct from standby red, go green, preset yellow */
-  --orange-dim: #4a2a10;
-  --orange-bright: #ff9500;
+  /* Operator attention: orange, distinct from standby red, go green,
+     preset yellow, and the yellow missing-position warning */
+  --attention-bright: #ff9500;
+  --attention-dim: #4a2f00;
 }
 
 html, body {
@@ -62,4 +63,9 @@ input {
 
 .flashing {
   animation: flash 0.5s ease-in-out infinite;
+}
+
+/* Utility: hide regardless of the element's own display rule */
+.hidden {
+  display: none !important;
 }

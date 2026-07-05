@@ -8,28 +8,24 @@ For a full walkthrough of every feature and how to use it, see [FEATURES.md](FEA
 
 Python 3.10 or newer. Python 3.12 is recommended — the project is developed, tested, and built on 3.12.
 
-## Quick start (no terminal knowledge needed)
+## Quick start (no setup knowledge needed)
 
-Download the project, then:
+Download/clone this folder onto the machine that will run the server, then:
 
-- **macOS / Linux:** run `./run.sh` in the project folder
+- **macOS / Linux:** open Terminal in the folder and run `./run.sh`
 - **Windows:** double-click `run.bat`
 
-On first run the script sets up a private Python environment and installs
-everything; after that it just starts the server and prints the addresses to
-open on each device. Keep the window open during the show.
+The first run sets everything up (creates a private virtualenv, installs
+dependencies — takes a minute); after that it starts instantly. The launcher
+prints the two URLs to open: one for the Caller, one for operators to join.
+Pass a port to use something other than 8000 (`./run.sh 9000`).
 
-## Install & run manually
+## Manual install / run
 
 ```bash
 pip install -r requirements.txt
-python -m server
-```
-
-`python -m server` starts the server on port 8000 and prints the join URLs.
-The equivalent raw command is:
-
-```bash
+python -m server            # prints the join URLs, listens on port 8000
+# or the explicit equivalent:
 uvicorn server.main:app --host 0.0.0.0 --port 8000
 ```
 

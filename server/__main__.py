@@ -1,47 +1,33 @@
-"""Entry point for `python -m server`: start CueLight and print the join URLs.
-
-Meant for non-technical users (see run.sh / run.bat) — equivalent to
-`uvicorn server.main:app --host 0.0.0.0 --port 8000` but with a friendly
-banner showing the addresses to open on the caller and operator devices.
-"""
+"""Run CueLight with `python -m server [port]` — no uvicorn incantation needed."""
 from __future__ import annotations
 
-import socket
 import sys
 
 import uvicorn
 
-HOST = "0.0.0.0"
-PORT = 8000
-
-
-def _get_local_ip() -> str:
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+from .main import _get_local_ip, app
 
 
 def main() -> None:
+    port = 8000
+    if len(sys.argv) > 1:
+        try:
+            port = int(sys.argv[1])
+        except ValueError:
+            print(f"Ignoring invalid port {sys.argv[1]!r}; using 8000")
     ip = _get_local_ip()
-    print()
-    print("=" * 56)
-    print("  CueLight is starting…")
-    print()
-    print(f"  Caller (this iPad/laptop):  http://{ip}:{PORT}")
-    print(f"  Operators join at:          http://{ip}:{PORT}/join")
-    print(f"  If mDNS works on your LAN:  http://cuelight.local:{PORT}")
-    print()
-    print("  Keep this window open for the whole show.")
-    print("  Press Ctrl+C to stop the server.")
-    print("=" * 56)
-    print()
-    sys.stdout.flush()  # the banner must land even when stdout is piped
-    uvicorn.run("server.main:app", host=HOST, port=PORT, log_level="warning")
+    banner = "\n".join([
+        "",
+        "  CueLight is running.",
+        f"  Caller (stage manager):  http://{ip}:{port}/",
+        f"  Operators join at:       http://{ip}:{port}/join",
+        "  (devices must be on the same network)",
+        "",
+        "  Press Ctrl+C to stop.",
+        "",
+    ])
+    print(banner, flush=True)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

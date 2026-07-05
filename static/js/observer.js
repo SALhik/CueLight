@@ -98,7 +98,29 @@
     renderGrid();
     renderTransport();
     renderWarnings();
+    renderAttention();
     renderStatus();
+  }
+
+  function renderAttention() {
+    const banner = document.getElementById("attentionBanner");
+    const raised = Object.values(state.positions).filter((p) => p.attention);
+    banner.innerHTML = "";
+    if (raised.length === 0) {
+      banner.classList.remove("visible");
+      return;
+    }
+    raised.forEach((pos) => {
+      const row = document.createElement("div");
+      row.className = "attention-row";
+      row.innerHTML =
+        '<span class="who">⚠ ' + escHtml(pos.label) + "</span>" +
+        (pos.attention_message
+          ? '<span class="msg">' + escHtml(pos.attention_message) + "</span>"
+          : "");
+      banner.appendChild(row);
+    });
+    banner.classList.add("visible");
   }
 
   function renderGrid() {
@@ -110,17 +132,17 @@
       col.className = "position-col";
       if (!pos.connected) col.classList.add("disconnected");
       if (isOsc) col.classList.add("osc-col");
-      if (pos.problem) col.classList.add("problem");
+      if (pos.attention) col.classList.add("attention");
 
       var header = document.createElement("div");
       header.className = "col-header";
       var badgeHtml;
-      if (isOsc) {
+      if (pos.attention) {
+        badgeHtml = '<div class="col-badge attention-badge flashing">⚠ ATTENTION</div>';
+      } else if (isOsc) {
         badgeHtml = '<div class="col-badge osc-badge">OSC</div>';
       } else if (!pos.connected) {
         badgeHtml = '<div class="col-badge disconnect-badge">DISCONNECTED</div>';
-      } else if (pos.problem) {
-        badgeHtml = '<div class="col-badge problem-badge">⚠ PROBLEM</div>';
       } else {
         badgeHtml = '<div class="col-badge"></div>';
       }
@@ -130,14 +152,6 @@
         '<div class="pos-label"><span class="pos-label-pill"' + pillStyle + ">" + escHtml(pos.label) + "</span></div>" +
         '<div class="cue-indicator">' + escHtml(pos.cue_indicator) + "</div>";
       col.appendChild(header);
-
-      // Read-only: the observer sees the message inline under the header
-      if (pos.problem && pos.problem_message) {
-        var msgEl = document.createElement("div");
-        msgEl.className = "problem-msg";
-        msgEl.textContent = pos.problem_message;
-        col.appendChild(msgEl);
-      }
 
       var sbBtn = document.createElement("div");
       sbBtn.className = "col-btn btn-standby-caller";

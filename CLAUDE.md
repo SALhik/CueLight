@@ -12,13 +12,9 @@ CueLight is a browser-based theatre cue light system. A Python server runs on on
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the server
-uvicorn server.main:app --host 0.0.0.0 --port 8000
-
-# Or: friendly entry point (same server, prints the join URLs)
+# Run the server (equivalently: ./run.sh, run.bat, or the uvicorn line)
 python -m server
-
-# Non-technical bootstrap (creates venv, installs, launches): run.sh / run.bat
+uvicorn server.main:app --host 0.0.0.0 --port 8000
 
 # Run the test suite
 python tests/test_cuelight.py
@@ -30,7 +26,7 @@ python -m pytest tests/test_cuelight.py::TestButtonStateMachine -v
 python -m pytest tests/test_cuelight.py::TestButtonStateMachine::test_standby_go_ack_cycle -v
 ```
 
-There is no build step, no linter configured, no type checker configured. The frontend is vanilla JS.
+There is no build step and no type checker configured. Ruff is the linter (`ruff.toml`; run `ruff check .`). CI (`.github/workflows/ci.yml`) runs ruff and the test suite on Python 3.10 and 3.12. The frontend is vanilla JS.
 
 ## Architecture
 
@@ -122,19 +118,19 @@ Colors are stored in `Position.color` (a hex string like `"#5b8def"`), persisted
 
 ### Persistence
 
-`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. `save_state()` serializes immediately (so the timer thread never reads live state) and only the disk write is deferred. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, color, problem flag/message, `auto_standby`, `osc_patch_filename`, `showfile_filename`, `show_start_time`, and `last_go_time`. The showfile and OSC patch contents are **not** stored in the snapshot — the lifespan calls `_restore_files()` in main.py to reload both from `showfiles/` and `patches/` by the stored filenames (patch first, so showfile arming includes OSC positions). `restore_showfile()` keeps the persisted cue index (clamped to the cue count) instead of resetting to 0, so a server restart mid-show resumes at the right cue. OSC positions are filtered out of the snapshot on write.
+`persistence.py` writes `state/snapshot.json` on every state change, debounced at 100ms. `save_state()` serializes immediately (so the timer thread never reads live state) and only the disk write is deferred. On startup, `load_state()` restores positions (marked disconnected), lock, password, cue index, color, `auto_standby`, `osc_patch_filename`, `showfile_filename`, and `show_started_at` (`last_go_at` and attention are deliberately transient). The showfile and OSC patch contents are **not** stored in the snapshot — the lifespan calls `_restore_files()` in main.py to reload both from `showfiles/` and `patches/` by the stored filenames (patch first, so showfile arming includes OSC positions). `restore_showfile()` keeps the persisted cue index (clamped to the cue count) instead of resetting to 0, so a server restart mid-show resumes at the right cue. OSC positions are filtered out of the snapshot on write.
 
 **EXIT and resume:** the EXIT button calls `wipe_state()`, which cancels any pending debounced write and renames the snapshot to `state/snapshot.bak` (not deletes). `GET /api/backup_info` reports whether a backup exists; `POST /api/resume_show` calls `StateManager.resume_show()`, which promotes the backup back via `restore_backup()`, keeps the current caller connection, closes live position sockets (their devices auto-reconnect and merge into the restored state), restores the show log, and then the endpoint reloads patch+showfile via `_restore_files()`. The caller UI offers resume on the post-EXIT screen and in Settings ("Previous Show" section).
 
 ### Show log
 
-`server/showlog.py` — `ShowLog` keeps an in-memory list of `{time, event, position, cue, detail}` entries and appends each to `state/showlog.jsonl` (so it survives restarts; loaded back in `__init__`). `StateManager` owns one as `self.log` and records under the lock: button events (`standby_called`/`standby_acked`/`go_called`/`go_acked`, with the current cue sequence), `master_standby`/`master_go`, `cue_advanced`/`cue_jumped`, `osc_fired` (detail = sent/no_reply), lock/pause/rename/join/disconnect/showfile/patch events, flash-check confirmations, `problem_raised`/`problem_cleared` (detail = message / who cleared), and `show_started`. Auto-standby calls carry `detail="auto"`. OSC heartbeat probes are deliberately NOT logged (noise). `GET /api/showlog` serves JSON, `?format=csv` a CSV attachment. `exit_show()` records `show_ended` then `log.rotate()` (archive to `showlog.bak`); `resume_show()` calls `log.restore()`.
+`server/showlog.py` — `ShowLog` keeps an in-memory list of `{time, event, position, cue, detail}` entries and appends each to `state/showlog.jsonl` (so it survives restarts; loaded back in `__init__`). `StateManager` owns one as `self.log` and records under the lock: button events (`standby_called`/`standby_acked`/`go_called`/`go_acked`, with the current cue sequence), `master_standby`/`master_go`, `cue_advanced`/`cue_jumped`, `osc_fired` (detail = sent/no_reply), lock/pause/rename/join/disconnect/showfile/patch events, and flash-check confirmations. Auto-standby calls carry `detail="auto"`. OSC heartbeat probes are deliberately NOT logged (noise). `GET /api/showlog` serves JSON, `?format=csv` a CSV attachment. `exit_show()` records `show_ended` then `log.rotate()` (archive to `showlog.bak`); `resume_show()` calls `log.restore()`.
 
 ### Label uniqueness
 
 Labels are unique (case-insensitive). Enforced at four points:
 - `POST /api/check_label` — checked by join page before navigating
-- `register_position()` in state.py — returns `"duplicate"` if a new client_id uses a taken label (includes OSC labels)
+- `register_position()` in state.py — returns `"duplicate"` if the label is taken by any *other* client_id (new joins and reconnects alike; includes OSC labels)
 - `rename_position()` in state.py — returns `False` if the new name conflicts
 - `load_patch()` in state.py — skips devices whose name collides with an existing human label
 - Caller-side rename modal also validates client-side before sending
@@ -145,37 +141,37 @@ Three endpoints: `/ws/caller`, `/ws/position`, and `/ws/observer`. On connect, t
 
 **Observers are read-only:** any number may connect (`observer_ws` dict in StateManager); they receive every `full_state` the caller gets, built by `get_full_state_for_observer()` which blanks `password`. Everything an observer sends is ignored. If `password_enabled`, the handshake password is checked and rejected with `role_rejected`. `register_caller`/`unregister_caller` push a full_state to observers so they see `caller_connected` flip; the observer page then offers a manual TAKE OVER button that simply navigates to `/` (a vacant caller seat accepts any client_id). `full_state` includes `caller_connected` and `auto_standby` fields.
 
-**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `set_color`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `set_auto_standby`, `flash_all`, `clear_flash`, `remove_position`, `load_patch`, `unload_patch`, `clear_problem` (with `client_id`), `start_show`
+**Caller messages (client → server):** `standby`, `go`, `standby_armed`, `go_armed`, `reset_armed`, `toggle_arm`, `rename`, `set_color`, `lock`, `exit`, `set_password`, `load_showfile`, `unload_showfile`, `jump_to_cue`, `prev_cue`, `pause`, `set_auto_standby`, `flash_all`, `clear_flash`, `remove_position`, `load_patch`, `unload_patch`, `clear_attention`, `start_show_clock`, `clear_show_clock`
 
-**Position messages (client → server):** `ack_standby`, `ack_go`, `ack_flash`, `rename`, `disconnect`, `pong`, `raise_problem` (optional `message`, capped at 60 chars server-side), `clear_problem`
+**Position messages (client → server):** `ack_standby`, `ack_go`, `ack_flash`, `raise_attention`, `clear_attention`, `rename`, `disconnect`, `pong`
 
-**Server → position messages:** `joined`, `standby_called`, `go_called`, `flash`, `state_reset`, `lock_changed`, `label_changed`, `color_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`, `problem_changed` (`problem`, `message`), `show_started` (`start_time`)
+**Server → position messages:** `joined`, `standby_called`, `go_called`, `flash`, `state_reset`, `lock_changed`, `label_changed`, `color_changed`, `cue_info`, `caller_disconnected`, `show_ended`, `removed`, `join_rejected`, `ping`, `health`, `attention_cleared`, `show_started`
 
 **Server → caller messages:** `role_assigned`, `role_rejected`, `full_state`, `osc_result`, `ping`, `error`
 
-**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save), `GET /api/showlog` (`?format=csv`), `GET /api/showreport` (HTML, `?format=csv`), `GET /api/backup_info`, `POST /api/resume_show`, `POST /api/csv/import`, `POST /api/csv/export`
+**HTTP API additions:** `GET /api/patches` (list), `GET /api/patch/{filename}`, `POST /api/patch/{filename}` (validate+save), `GET /api/showlog` (`?format=csv`), `GET /api/showreport` (`?format=txt|csv|html`), `GET /api/backup_info`, `POST /api/resume_show`, `POST /api/csv/import`, `POST /api/csv/export`
 
-### Problem signal (position → caller)
-
-Operators raise a PROBLEM flag from the position console (bezel button opens an in-flow panel with big preset buttons NOT READY / PROP ISSUE / NEED SM plus optional free text). `raise_problem` sets `Position.problem = True` and `Position.problem_message` (server caps at `PROBLEM_MESSAGE_MAX = 60` chars); `clear_problem` clears it — sent by the caller (with `client_id`) or by the raising position itself. Both directions are echoed to the position as `problem_changed` and to the caller/observers via `full_state`. Raising is NOT gated on `locked` (operator communication matters most during a hold). OSC positions never carry problems.
-
-The flag and message are **persisted** in the snapshot (and thus survive reconnects, restarts, and EXIT/resume). Raise/clear are logged as `problem_raised` (detail = message) / `problem_cleared` (detail = "by caller" / "by operator"). Caller UI: solid orange `⚠ PROBLEM` badge (deliberately NON-flashing so it never disturbs the calling rhythm) + orange column outline; tapping the badge opens a readout modal with a Clear button. The position's panel sits in the layout flow (it shrinks the cue buttons rather than covering them) and is auto-closed by an incoming standby/GO. If the position disconnects, the DISCONNECTED badge takes precedence but the orange outline remains.
-
-### Show timer / START SHOW
-
-`start_show` (caller message) sets `AppState.show_start_time` (ISO string, persisted; cleared by EXIT since EXIT resets AppState), logs `show_started` (detail = "restart" on re-press), and broadcasts a `show_started` message to all positions — the position page shows a transient 4s banner (`.show-banner`, `pointer-events: none`, floats over the header strip, never the cue buttons). `AppState.last_go_time` is stamped on every `call_go`/`go_armed` (persisted). Both fields ride in `full_state`; the caller's bottom bar renders a quiet monospace timer from them, with per-device checkboxes in Settings → Show Timer (elapsed / since last GO / clock; stored in `localStorage` `cuelight_timer_prefs`). The START SHOW button confirms before (re)starting.
-
-### Post-show report
-
-`server/showreport.py` computes a report **on demand** from `manager.log.entries` — nothing is persisted. `compute_report()` matches each `standby_called` to the next `standby_acked` per position (a `go_called` cancels a pending standby → counted as never-acked, mirroring the server's auto-clear), takes deltas between consecutive `master_go` events for time-between-GOs, counts auto vs manual standbys (`detail == "auto"`), sums joins/disconnects, and pairs `problem_raised`/`problem_cleared`. `GET /api/showreport` serves a self-contained HTML page (inline CSS, all user text escaped); `?format=csv` a flat `section,position,cue,metric,value` CSV. Exposed like `/api/showlog` (no password gate). Buttons live in caller Settings → Show Log.
-
-### Operator alerts (pure frontend)
-
-Position-only, opt-in, in `position.js`: the ALERT bezel button toggles beep+vibration on incoming `standby_called`/`go_called` (two short 880Hz beeps = standby, one long lower beep = GO; `navigator.vibrate` patterns where supported — Android only, iOS relies on the beep). WebAudio requires a user gesture, so the AudioContext is created/resumed on taps while alerts are on (same constraint-driven pattern as keepawake); the toggle tap itself unlocks and plays a confirmation blip. Persisted in `localStorage` (`cuelight_alerts`), off by default. No server involvement.
+**HTTP auth:** when a join password is set, the mutating endpoints (`POST /api/showfile/{f}`, `POST /api/patch/{f}` including `_probe_test`, `POST /api/resume_show`) and `GET /api/showlog` / `GET /api/showreport` require it — `X-CueLight-Password` header or `?password=` query param (kept for curl/direct-URL use), checked by `_password_ok()` in main.py; wrong/missing → 401. The caller sends the header from `full_state` (`pwAuth()` in caller.js — the log/report buttons fetch with it and open blob URLs, so the password never appears in a URL); the editor prompts on the first 401 and keeps it in `sessionStorage` (`authFetch()` in editor.js). `POST /api/_test_reset` answers 404 unless the `CUELIGHT_TEST_MODE=1` env var is set — it must never be callable in production.
 
 ### Flash roll call
 
 `flash_all` sets `Position.flash = "pending"` on every connected human position and sends them a `flash` message (OSC and disconnected positions are reset to `"none"`); the position shows a blinking overlay until tapped, which sends `ack_flash` → `flash = "confirmed"`. `clear_flash` resets all. `flash` is transient — serialized in `to_dict()` but never restored from the snapshot. The caller UI lives in Settings (Health list shows waiting/here markers and re-renders on every `full_state` while the modal is open).
+
+### Operator attention
+
+Positions can flag the caller: `raise_attention {message}` sets `Position.attention` + `attention_message` (truncated to `ATTENTION_MESSAGE_MAX`, human positions only) — **deliberately not blocked by the lock**, in either direction: raising gets through during a hold (the position's lock overlay has its own report button), and the caller's banner sits above the lock overlay (`z-index: 116` > lock's 115) so reports can be read and cleared without unlocking (`clear_attention` is not lock-gated server-side). Cleared by the operator (`clear_attention` from the position) or the caller (`clear_attention {client_id}`); a caller clear pushes `attention_cleared` to the operator ("seen" feedback). Like `flash`, attention is transient: serialized in `to_dict()` but never restored from the snapshot. Caller/observer UI: `⚠ ATTENTION` badge on the column (takes precedence over OSC/DISCONNECTED badges) plus an orange banner row per report with the message inline (`renderAttention()`); the caller's rows have CLEAR buttons, the observer's don't. Logged as `attention_raised` (detail = message) / `attention_cleared` (detail = caller|operator).
+
+### Show clock
+
+`AppState.show_started_at` (epoch; persisted so a mid-show restart keeps the clock; EXIT clears) and `AppState.last_go_at` (epoch of the most recent GO — stamped in `call_go` and `go_armed`; transient, not restored). Caller messages `start_show_clock` / `clear_show_clock`; starting logs `show_started` and broadcasts a `show_started` message to positions (they show a brief toast). Both fields ride in `full_state`; the caller renders a ticking clock strip in the bottom bar (1s interval), correcting device clock drift with an offset measured from heartbeat `ping` timestamps (`serverClockOffset`). Which segments show (time of day / elapsed / since-last-GO) is a device-local preference in `localStorage` (`cuelight_clock_prefs`), edited in Settings → Show Clock.
+
+### Show report
+
+`server/showreport.py` — `build_report(entries)` computes a post-show summary from the show log **on demand, storing nothing**: show start (prefers the `show_started` event, else first entry) / end / duration, event totals, per-position standby/GO counts with ack latency avg/max (pairing each `*_called` with the next `*_acked` per position), OSC fire and attention counts, and gaps between consecutive `master_go`s. Three renderers: `report_to_text()` (plain text), `report_to_csv()` (CSV with formula-injection sanitisation via `_DANGEROUS`/`_safe`), and `report_to_html()` (self-contained dark-theme HTML). Served by `GET /api/showreport` (`?format=txt|csv|html`; password-gated): `txt` → `text/plain`, `csv` → `text/csv` with `Content-Disposition: attachment`, `html` → `text/html`, default → JSON. Opened from Settings → Show Log → "Show report".
+
+### Cue alert (position, frontend-only)
+
+The position bezel's ALERT toggle (`cuelight_alert_mode` in `localStorage`, off by default) plays WebAudio beeps on `standby_called`/`go_called` (double 880Hz for standby, single 660Hz for GO) plus `navigator.vibrate` where supported. The AudioContext is created/resumed on the toggle tap or the first tap after load — WebAudio needs a user gesture and must not use secure-context-only APIs.
 
 ### Auto-standby
 
@@ -203,3 +199,5 @@ Server pings each position every 1s. Position echoes `pong` with the timestamp, 
 Tests are in `tests/test_cuelight.py`. They test via real WebSocket connections to a running server (integration tests, not mocks). The test harness starts a uvicorn server on port 8001 in a background thread, runs async test methods using `asyncio.run()`, and tears down after. Tests use the `websockets` library to connect as caller/positions and assert on the JSON messages received.
 
 Always clean `state/snapshot.json` (plus `snapshot.bak`, `showlog.jsonl`, `showlog.bak`) before test runs to avoid state leakage — the suite's `_clean_state()` does this in setUp/tearDown of the module.
+
+The test module sets `CUELIGHT_TEST_MODE=1` at import so `/api/_test_reset` (used by every test's setUp) exists; the server runs in a thread of the test process, so it sees the variable.

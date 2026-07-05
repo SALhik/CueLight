@@ -17,36 +17,41 @@
     <button class="btn-standby" id="standbyBtn">STANDBY</button>
     <button class="btn-go" id="goBtn">GO</button>
   </div>
-  <!-- Problem panel sits in the layout flow: opening it shrinks the cue
-       buttons instead of covering them, so STANDBY/GO stay tappable. -->
-  <div class="problem-panel" id="problemPanel">
-    <div class="problem-row">
-      <button class="problem-preset" data-msg="NOT READY">NOT READY</button>
-      <button class="problem-preset" data-msg="PROP ISSUE">PROP ISSUE</button>
-      <button class="problem-preset" data-msg="NEED SM">NEED SM</button>
-    </div>
-    <div class="problem-row">
-      <input type="text" id="problemInput" maxlength="60" placeholder="Optional message…">
-      <button class="problem-raise" id="problemRaiseBtn">RAISE</button>
-    </div>
-    <button class="problem-clear" id="problemClearBtn">CLEAR PROBLEM</button>
-  </div>
   <div class="caller-warning" id="callerWarning">Caller disconnected — waiting…</div>
   <div class="bottom-bezel">
     <div class="bezel-left">
       <button class="btn-reset" id="resetBtn">RESET</button>
       <button class="btn-dim" id="dimBtn">DIM</button>
       <button class="btn-dim" id="alertBtn">ALERT</button>
-      <button class="btn-problem" id="problemBtn">PROBLEM</button>
+      <button class="btn-attention" id="attentionBtn" aria-label="Report a problem" title="Report a problem">⚠</button>
     </div>
     <div class="bezel-right">
       <span class="label-display" id="labelDisplay"></span>
       <span class="health-dot" id="healthDot"></span>
     </div>
   </div>
-  <div class="show-banner" id="showBanner">SHOW STARTED</div>
   <div class="flash-overlay" id="flashOverlay">FLASH CHECK<br>TAP TO CONFIRM</div>
-  <div class="lock-overlay" id="lockOverlay">LOCKED</div>
+  <div class="lock-overlay" id="lockOverlay">
+    <span>LOCKED</span>
+    <button class="lock-attention" id="lockAttentionBtn">⚠ REPORT PROBLEM</button>
+  </div>
+  <div class="attention-panel" id="attentionPanel">
+    <div class="attention-box">
+      <div class="attention-title" id="attentionTitle">Report a problem to the caller</div>
+      <div class="attention-presets" id="attentionPresets">
+        <button class="preset-chip">NOT READY</button>
+        <button class="preset-chip">TECH PROBLEM</button>
+        <button class="preset-chip">NEED HELP</button>
+      </div>
+      <input type="text" id="attentionInput" maxlength="120" placeholder="Optional message…">
+      <div class="attention-actions">
+        <button id="attentionSendBtn">RAISE ⚠</button>
+        <button id="attentionWithdrawBtn" class="hidden">WITHDRAW</button>
+        <button id="attentionCancelBtn">CANCEL</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
   <div class="dim-overlay" id="dimOverlay"></div>
   <script src="/static/js/keepawake.js"></script>
   <script src="/static/js/position.js"></script>

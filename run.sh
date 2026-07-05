@@ -1,21 +1,20 @@
-#!/bin/sh
-# One-line CueLight launcher for macOS / Linux.
-# Creates a virtualenv on first run, installs dependencies, starts the server.
+#!/usr/bin/env bash
+# One-command CueLight launcher (macOS / Linux).
+# First run creates a private virtualenv and installs dependencies;
+# after that it just starts the server. Usage: ./run.sh [port]
 set -e
 cd "$(dirname "$0")"
 
-PY=python3
-command -v "$PY" >/dev/null 2>&1 || PY=python
-if ! command -v "$PY" >/dev/null 2>&1; then
-  echo "Python 3 is not installed. Get it from https://www.python.org/downloads/"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Python 3 is required. Install it from https://www.python.org/downloads/"
   exit 1
 fi
 
-if [ ! -d ".venv" ]; then
+if [ ! -d .venv ]; then
   echo "First run: setting up (this takes a minute)…"
-  "$PY" -m venv .venv
+  python3 -m venv .venv || { echo "Failed to create the virtual environment."; exit 1; }
 fi
 
-. .venv/bin/activate
-pip install -q -r requirements.txt
-exec python -m server
+./.venv/bin/pip install --quiet -r requirements.txt \
+  || { echo "Failed to install dependencies. Check your internet connection and try again."; exit 1; }
+exec ./.venv/bin/python -m server "$@"

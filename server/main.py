@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import socket
 import threading
 from contextlib import asynccontextmanager
@@ -16,8 +17,8 @@ from .files import require_safe_filename
 from .patch import list_patches, load_patch, save_patch, validate_patch
 from .persistence import load_state
 from .showcsv import csv_to_cues, cues_to_csv
+from .showreport import build_report, report_to_csv, report_to_html, report_to_text
 from .showfile import list_showfiles, load_showfile, save_showfile, validate_showfile
-from .showreport import report_csv, report_html
 from .state import StateManager
 from .ws import caller_ws_handler, observer_ws_handler, position_ws_handler
 
@@ -154,6 +155,19 @@ async def apple_touch_icon():
 
 # --- API ---
 
+def _password_ok(request: Request) -> bool:
+    """Mutating endpoints and the show log honor the join password when one is
+    set. Clients send it as an X-CueLight-Password header, or ?password= for
+    plain links that can't set headers (the show log download)."""
+    attempt = (request.headers.get("x-cuelight-password")
+               or request.query_params.get("password", ""))
+    return manager.check_password(attempt)
+
+
+def _password_required() -> JSONResponse:
+    return JSONResponse({"error": "password required"}, status_code=401)
+
+
 @app.get("/api/info")
 async def api_info(request: Request):
     ip = _get_local_ip()
@@ -207,6 +221,8 @@ async def api_get_showfile(filename: str):
 
 @app.post("/api/showfile/{filename}")
 async def api_save_showfile(filename: str, request: Request):
+    if not _password_ok(request):
+        return _password_required()
     try:
         require_safe_filename(filename)
     except ValueError:
@@ -258,6 +274,8 @@ async def api_get_patch(filename: str):
 
 @app.post("/api/patch/{filename}")
 async def api_save_patch(filename: str, request: Request):
+    if not _password_ok(request):
+        return _password_required()
     try:
         data = await request.json()
     except json.JSONDecodeError:
@@ -297,7 +315,9 @@ async def api_backup_info():
 
 
 @app.post("/api/resume_show")
-async def api_resume_show():
+async def api_resume_show(request: Request):
+    if not _password_ok(request):
+        return _password_required()
     ok = await manager.resume_show()
     if ok:
         await _restore_files(manager)
@@ -305,7 +325,9 @@ async def api_resume_show():
 
 
 @app.get("/api/showlog")
-async def api_showlog(format: str = "json"):
+async def api_showlog(request: Request, format: str = "json"):
+    if not _password_ok(request):
+        return _password_required()
     if format == "csv":
         return Response(
             manager.log.to_csv(),
@@ -316,23 +338,32 @@ async def api_showlog(format: str = "json"):
 
 
 @app.get("/api/showreport")
-async def api_showreport(format: str = "html"):
-    """Post-show report computed on demand from the show log; nothing is
-    stored server-side. Exposed like /api/showlog (no password gate)."""
+async def api_showreport(request: Request, format: str = "json"):
+    """Post-show report, computed on demand from the show log — never stored."""
+    if not _password_ok(request):
+        return _password_required()
+    report = build_report(manager.log.entries)
+    if format == "txt":
+        return Response(report_to_text(report), media_type="text/plain; charset=utf-8")
     if format == "csv":
         return Response(
-            report_csv(manager.log.entries),
+            report_to_csv(report),
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="showreport.csv"'},
         )
-    return HTMLResponse(report_html(manager.log.entries))
+    if format == "html":
+        return Response(report_to_html(report), media_type="text/html; charset=utf-8")
+    return report
 
 
 # --- Test support ---
 
 @app.post("/api/_test_reset")
 async def test_reset():
-    """Reset all server state. For test use only."""
+    """Reset all server state. Only answers when CUELIGHT_TEST_MODE=1 (set by
+    the test harness) — anyone on the LAN could otherwise end a live show."""
+    if os.environ.get("CUELIGHT_TEST_MODE") != "1":
+        return JSONResponse({"error": "not found"}, status_code=404)
     await manager.exit_show()
     return {"ok": True}
 
