@@ -306,9 +306,12 @@
     applyAlert();
   });
 
+  // Persistent, not { once: true }: iOS suspends the AudioContext on audio
+  // interruptions (calls, Siri) and resume() outside a user gesture can be
+  // rejected, so every tap must be able to re-arm it.
   document.addEventListener("pointerdown", () => {
     if (alertOn) ensureAudio();
-  }, { once: true });
+  });
 
   applyAlert();
 

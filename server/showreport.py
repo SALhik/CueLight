@@ -17,12 +17,6 @@ def _safe(value: object) -> object:
         return "'" + value
     return value
 
-# Events that pair a "called" with its ack, per position
-_PAIRS = {
-    "standby_called": ("standby_acked", "standby"),
-    "go_called": ("go_acked", "go"),
-}
-
 
 def _parse_time(value: str) -> datetime | None:
     try:
