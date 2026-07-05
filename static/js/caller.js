@@ -748,30 +748,52 @@
 
   // --- Show log ---
   // Protected endpoints want the join password when one is set; the caller
-  // already has it from full_state. Links can't set headers, so they get it
-  // as a query param instead.
+  // already has it from full_state. It goes in a header, never a query
+  // param — query strings end up in server access logs and browser history.
   function pwAuth() {
     return state.password_enabled && state.password
       ? { "X-CueLight-Password": state.password }
       : {};
   }
 
-  function pwQuery(sep) {
-    return state.password_enabled && state.password
-      ? sep + "password=" + encodeURIComponent(state.password)
-      : "";
+  // The tab must be opened synchronously — Safari's popup blocker only
+  // allows window.open inside the tap gesture, not after an await.
+  async function viewAuthed(path) {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    try {
+      const res = await fetch(path, { headers: pwAuth() });
+      if (!res.ok) throw new Error(res.status);
+      const text = await res.text();
+      win.location = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    } catch (e) {
+      win.close();
+    }
+  }
+
+  async function downloadAuthed(path, filename) {
+    try {
+      const res = await fetch(path, { headers: pwAuth() });
+      if (!res.ok) return;
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {}
   }
 
   document.getElementById("downloadLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog?format=csv" + pwQuery("&"));
+    downloadAuthed("/api/showlog?format=csv", "showlog.csv");
   });
 
   document.getElementById("viewLogBtn").addEventListener("click", () => {
-    window.open("/api/showlog" + pwQuery("?"));
+    viewAuthed("/api/showlog");
   });
 
   document.getElementById("showReportBtn").addEventListener("click", () => {
-    window.open("/api/showreport?format=txt" + pwQuery("&"));
+    viewAuthed("/api/showreport?format=txt");
   });
 
   document.getElementById("pwToggle").addEventListener("change", (e) => {
