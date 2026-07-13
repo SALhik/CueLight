@@ -99,15 +99,55 @@ app = FastAPI(title="CueLight", lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+_TUNNEL_IFACE_HINTS = ("tun", "tap", "ppp", "wg", "ipsec", "zt", "vpn")
+
+
 def _get_local_ip() -> str:
+    """Best-effort LAN IP for the mDNS advertisement, /api/info, and the join
+    QR code. A VPN's default route can make the getsockname() trick below
+    return the VPN's tunnel address instead of the Wi-Fi/Ethernet IP other
+    devices on the LAN can actually reach, so fall back to scanning interfaces
+    for a real one when that happens."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
-        return ip
     except Exception:
-        return "127.0.0.1"
+        return _first_lan_ip() or "127.0.0.1"
+
+    if _is_tunnel_ip(ip):
+        return _first_lan_ip() or ip
+    return ip
+
+
+def _is_tunnel_ip(ip: str) -> bool:
+    try:
+        import ifaddr
+
+        for adapter in ifaddr.get_adapters():
+            if any(a.is_IPv4 and a.ip == ip for a in adapter.ips):
+                name = (adapter.nice_name or adapter.name).lower()
+                return any(hint in name for hint in _TUNNEL_IFACE_HINTS)
+    except Exception:
+        pass
+    return False
+
+
+def _first_lan_ip() -> str | None:
+    try:
+        import ifaddr
+
+        for adapter in ifaddr.get_adapters():
+            name = (adapter.nice_name or adapter.name).lower()
+            if any(hint in name for hint in _TUNNEL_IFACE_HINTS):
+                continue
+            for ip in adapter.ips:
+                if ip.is_IPv4 and not ip.ip.startswith(("127.", "169.254.")):
+                    return ip.ip
+    except Exception:
+        pass
+    return None
 
 
 # --- HTML pages ---
