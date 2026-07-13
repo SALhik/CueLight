@@ -38,7 +38,7 @@ class ShowLog:
         self.entries.append(entry)
         try:
             STATE_DIR.mkdir(parents=True, exist_ok=True)
-            with SHOWLOG_PATH.open("a") as f:
+            with SHOWLOG_PATH.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except OSError:
             pass
@@ -69,7 +69,7 @@ def _read_entries(path: Path) -> list[dict[str, Any]]:
         return []
     entries: list[dict[str, Any]] = []
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return []
     for line in text.splitlines():

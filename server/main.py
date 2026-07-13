@@ -154,27 +154,27 @@ def _first_lan_ip() -> str | None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return (STATIC_DIR / "caller.html").read_text()
+    return (STATIC_DIR / "caller.html").read_text(encoding="utf-8")
 
 
 @app.get("/join", response_class=HTMLResponse)
 async def join_page():
-    return (STATIC_DIR / "join.html").read_text()
+    return (STATIC_DIR / "join.html").read_text(encoding="utf-8")
 
 
 @app.get("/position", response_class=HTMLResponse)
 async def position_page():
-    return (STATIC_DIR / "position.html").read_text()
+    return (STATIC_DIR / "position.html").read_text(encoding="utf-8")
 
 
 @app.get("/editor", response_class=HTMLResponse)
 async def editor_page():
-    return (STATIC_DIR / "editor.html").read_text()
+    return (STATIC_DIR / "editor.html").read_text(encoding="utf-8")
 
 
 @app.get("/observer", response_class=HTMLResponse)
 async def observer_page():
-    return (STATIC_DIR / "observer.html").read_text()
+    return (STATIC_DIR / "observer.html").read_text(encoding="utf-8")
 
 
 @app.get("/.well-known/appspecific/com.chrome.devtools.json")
@@ -255,7 +255,7 @@ async def api_get_showfile(filename: str):
     path = SHOWFILES_DIR / filename
     if not path.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return data
 
 

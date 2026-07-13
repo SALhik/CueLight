@@ -20,7 +20,7 @@ def load_showfile(filename: str) -> Showfile:
     path = SHOWFILES_DIR / filename
     if not path.exists():
         raise FileNotFoundError(f"Showfile not found: {filename}")
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return _parse_showfile(data, filename)
 
 
@@ -56,7 +56,7 @@ def save_showfile(filename: str, data: dict[str, Any]) -> None:
     require_safe_filename(filename)
     SHOWFILES_DIR.mkdir(parents=True, exist_ok=True)
     path = SHOWFILES_DIR / filename
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _parse_showfile(data: dict[str, Any], filename: str) -> Showfile:

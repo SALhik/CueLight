@@ -21,7 +21,7 @@ def load_patch(filename: str) -> OscPatch:
     if not path.exists():
         raise FileNotFoundError(f"Patch not found: {filename}")
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in patch file {filename}: {e}") from e
     return _parse_patch(data, filename)
@@ -65,7 +65,7 @@ def save_patch(filename: str, data: dict[str, Any]) -> None:
         raise ValueError(f"Invalid patch data: {'; '.join(errors)}")
     PATCHES_DIR.mkdir(parents=True, exist_ok=True)
     path = PATCHES_DIR / filename
-    path.write_text(json.dumps(data, indent=2))
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def _parse_patch(data: dict[str, Any], filename: str) -> OscPatch:

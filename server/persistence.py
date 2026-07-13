@@ -42,7 +42,7 @@ def _serialize(state: AppState) -> dict:
 def _write_snapshot(data: dict) -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = SNAPSHOT_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(SNAPSHOT_PATH)
 
 
@@ -50,7 +50,7 @@ def load_state() -> AppState:
     if not SNAPSHOT_PATH.exists():
         return AppState()
     try:
-        data = json.loads(SNAPSHOT_PATH.read_text())
+        data = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return AppState()
 
@@ -110,7 +110,7 @@ def backup_info() -> dict:
     if not BACKUP_PATH.exists():
         return {"exists": False}
     try:
-        data = json.loads(BACKUP_PATH.read_text())
+        data = json.loads(BACKUP_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"exists": False}
     return {
