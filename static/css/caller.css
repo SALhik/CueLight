@@ -331,7 +331,9 @@ body {
   flex-shrink: 0;
 }
 
-/* Bottom bar */
+/* Bottom bar: holds UNLOCK/EXIT/SETTINGS, which must stay reachable during a
+   lock (same reasoning as .attention-banner) — sits above the lock overlay
+   (115) so it isn't covered and made unclickable while the system is locked. */
 .bottom-bar {
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -340,7 +342,7 @@ body {
   align-items: center;
   gap: 12px;
   position: relative;
-  z-index: 110;
+  z-index: 117;
 }
 
 .bottom-bar button {
